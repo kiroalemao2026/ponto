@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Administrativo - Sistema de Ponto</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body style="overflow-y: auto;">
+
+<div class="d-flex flex-column flex-md-row min-vh-100">
+
+  <!-- Sidebar -->
+  <aside class="admin-sidebar">
+    <div class="brand">
+      <div class="d-flex align-items-center gap-2">
+        <i class="fas fa-clock text-accent fs-4"></i>
+        <div>
+          <div class="fw-bold text-light">Ponto Mobilittà</div>
+          <small class="text-muted" style="font-size: 0.75rem;">Administração</small>
+        </div>
+      </div>
+    </div>
+
+    <nav class="d-flex flex-column gap-1">
+      <a href="#" class="nav-item-link ativo" onclick="navegarAba('dashboard', this); return false;">
+        <i class="fas fa-chart-line"></i> Dashboard
+      </a>
+      <a href="#" class="nav-item-link" onclick="navegarAba('funcionarios', this); return false;">
+        <i class="fas fa-users"></i> Funcionários
+      </a>
+      <a href="#" class="nav-item-link" onclick="navegarAba('registros', this); return false;">
+        <i class="fas fa-calendar-check"></i> Registros de Ponto
+      </a>
+      <a href="#" class="nav-item-link" onclick="navegarAba('relatorios', this); return false;">
+        <i class="fas fa-file-invoice"></i> Espelho / Relatórios
+      </a>
+      <div class="border-top border-secondary my-3"></div>
+      <a href="/" class="nav-item-link" target="_blank">
+        <i class="fas fa-external-link-alt"></i> Abrir Batedor de Ponto
+      </a>
+      <a href="#" class="nav-item-link text-danger" onclick="fazerLogout(); return false;">
+        <i class="fas fa-sign-out-alt"></i> Sair do Painel
+      </a>
+    </nav>
+  </aside>
+
+  <!-- Conteúdo Principal -->
+  <main class="admin-content">
+
+    <!-- ── ABA 1: DASHBOARD ── -->
+    <section id="aba-dashboard" class="aba-secao">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h3 class="fw-bold mb-1">Visão Geral</h3>
+          <p class="text-muted mb-0" id="dash-data-atual"></p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="carregarDadosGerais()">
+          <i class="fas fa-sync-alt me-1"></i> Atualizar
+        </button>
+      </div>
+
+      <!-- Cards de Métricas -->
+      <div class="row g-3 mb-4">
+        <div class="col-sm-6 col-xl-3">
+          <div class="card-dark p-3">
+            <div class="text-muted small">Total de Colaboradores</div>
+            <div class="fs-2 fw-bold text-light mt-1" id="dash-total-func">--</div>
+            <div class="text-success small mt-1"><i class="fas fa-user-check me-1"></i>Ativos no sistema</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="card-dark p-3">
+            <div class="text-muted small">Presentes Hoje</div>
+            <div class="fs-2 fw-bold text-success mt-1" id="dash-presentes">--</div>
+            <div class="text-muted small mt-1"><i class="fas fa-sign-in-alt me-1"></i>Registraram entrada</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="card-dark p-3">
+            <div class="text-muted small">Batidas de Ponto Hoje</div>
+            <div class="fs-2 fw-bold text-info mt-1" id="dash-batidas-hoje">--</div>
+            <div class="text-muted small mt-1"><i class="fas fa-fingerprint me-1"></i>Registros no Firestore</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="card-dark p-3">
+            <div class="text-muted small">Sem Registro Hoje</div>
+            <div class="fs-2 fw-bold text-danger mt-1" id="dash-ausentes">--</div>
+            <div class="text-muted small mt-1"><i class="fas fa-user-clock me-1"></i>Colaboradores ausentes</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabela rápida de últimos registros -->
+      <div class="card-dark p-4">
+        <h5 class="fw-bold mb-3"><i class="fas fa-history text-accent me-2"></i>Últimos Registros em Tempo Real</h5>
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Colaborador</th>
+                <th>Cargo / Depto</th>
+                <th>Tipo</th>
+                <th>Biometria</th>
+                <th>Foto</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-dash-ultimos">
+              <tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando registros...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ABA 2: FUNCIONÁRIOS ── -->
+    <section id="aba-funcionarios" class="aba-secao d-none">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+          <h3 class="fw-bold mb-1">Gestão de Colaboradores</h3>
+          <p class="text-muted mb-0">Cadastre e gerencie a biometria facial dos funcionários</p>
+        </div>
+        <button class="btn btn-danger" onclick="abrirModalFuncionario()">
+          <i class="fas fa-user-plus me-2"></i>Novo Colaborador
+        </button>
+      </div>
+
+      <div class="card-dark p-4">
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <input type="text" id="filtro-func-busca" class="form-control" placeholder="Buscar por nome ou CPF..." oninput="filtrarFuncionarios()">
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Foto</th>
+                <th>Nome</th>
+                <th>CPF</th>
+                <th>Cargo / Departamento</th>
+                <th>Biometria Facial</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-funcionarios">
+              <tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando colaboradores...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ABA 3: REGISTROS DE PONTO ── -->
+    <section id="aba-registros" class="aba-secao d-none">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+          <h3 class="fw-bold mb-1">Registros de Ponto</h3>
+          <p class="text-muted mb-0">Histórico completo de entradas e saídas</p>
+        </div>
+        <button class="btn btn-outline-success" onclick="exportarCSV()">
+          <i class="fas fa-file-csv me-2"></i>Exportar CSV
+        </button>
+      </div>
+
+      <div class="card-dark p-4">
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <input type="date" id="filtro-data-inicio" class="form-control" onchange="carregarRegistros()">
+          </div>
+          <div class="col-md-4">
+            <input type="date" id="filtro-data-fim" class="form-control" onchange="carregarRegistros()">
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-secondary w-100" onclick="limparFiltrosData()">
+              <i class="fas fa-eraser me-1"></i> Ver Todos
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Data e Hora</th>
+                <th>Colaborador</th>
+                <th>CPF</th>
+                <th>Tipo</th>
+                <th>Confiança</th>
+                <th>Foto da Batida</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-todos-registros">
+              <tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando histórico...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ABA 4: ESPELHO / RELATÓRIO ── -->
+    <section id="aba-relatorios" class="aba-secao d-none">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+          <h3 class="fw-bold mb-1">Espelho de Ponto</h3>
+          <p class="text-muted mb-0">Cálculo de horas trabalhadas por funcionário</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="gerarEspelho()">
+          <i class="fas fa-calculator me-1"></i> Recalcular
+        </button>
+      </div>
+
+      <div class="card-dark p-4 mb-4">
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label">Selecione o Colaborador:</label>
+            <select id="select-relatorio-func" class="form-select" onchange="gerarEspelho()"></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Mês / Ano:</label>
+            <input type="month" id="select-relatorio-mes" class="form-control" onchange="gerarEspelho()">
+          </div>
+        </div>
+      </div>
+
+      <div class="card-dark p-4">
+        <h5 class="fw-bold mb-3" id="titulo-espelho">Folha de Ponto</h5>
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Entrada</th>
+                <th>Saída Almoço</th>
+                <th>Retorno Almoço</th>
+                <th>Saída</th>
+                <th>Total Trabalhado</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-espelho-corpo">
+              <tr><td colspan="6" class="text-center py-4 text-muted">Selecione um funcionário e mês acima</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── MODAL: CADASTRAR / EDITAR FUNCIONÁRIO ── -->
+<div class="modal fade" id="modal-func" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modal-func-titulo"><i class="fas fa-user-plus text-accent me-2"></i>Cadastrar Colaborador</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="form-salvar-func" onsubmit="salvarFuncionario(event)">
+          <input type="hidden" id="func-id">
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-7">
+              <label class="form-label">Nome Completo *</label>
+              <input type="text" id="func-nome" class="form-control" placeholder="Ex: João da Silva" required>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label">CPF *</label>
+              <input type="text" id="func-cpf" class="form-control" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPFModal(this)" required>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label">Cargo *</label>
+              <input type="text" id="func-cargo" class="form-control" placeholder="Ex: Operador" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Departamento *</label>
+              <input type="text" id="func-departamento" class="form-control" placeholder="Ex: Produção" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Email</label>
+              <input type="email" id="func-email" class="form-control" placeholder="joao@empresa.com">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Status</label>
+            <select id="func-ativo" class="form-select">
+              <option value="true">Ativo (Pode bater ponto)</option>
+              <option value="false">Inativo</option>
+            </select>
+          </div>
+
+          <!-- SEÇÃO BIOMETRIA FACIAL -->
+          <div class="border border-secondary rounded p-3 mb-3 bg-dark">
+            <label class="form-label fw-bold text-accent"><i class="fas fa-camera me-1"></i> Biometria Facial para Reconhecimento</label>
+            <p class="small text-muted mb-2">Capture uma foto ao vivo pela webcam ou envie uma foto com boa iluminação frontal.</p>
+
+            <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+              <button type="button" class="btn btn-outline-info btn-sm" onclick="iniciarCameraAdmin()">
+                <i class="fas fa-video me-1"></i> Ligar Câmera ao Vivo
+              </button>
+              <label class="btn btn-outline-light btn-sm mb-0">
+                <i class="fas fa-upload me-1"></i> Enviar Foto do Computador
+                <input type="file" id="input-foto-arquivo" accept="image/*" class="d-none" onchange="carregarFotoArquivo(this)">
+              </label>
+            </div>
+
+            <!-- Câmera ao vivo para captura -->
+            <div id="wrapper-cam-admin" class="d-none mb-3 text-center">
+              <div style="position:relative; width:320px; height:240px; margin:auto; background:#000; border-radius:8px; overflow:hidden;">
+                <video id="video-cam-admin" width="320" height="240" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>
+              </div>
+              <button type="button" class="btn btn-warning btn-sm mt-2" onclick="capturarFotoCamAdmin()">
+                <i class="fas fa-camera me-1"></i> Fotografar e Gerar Biometria
+              </button>
+            </div>
+
+            <!-- Pré-visualização e status da biometria -->
+            <div id="preview-foto-container" class="d-flex align-items-center gap-3">
+              <img id="img-preview-func" src="" alt="Foto" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:2px solid var(--border);display:none;">
+              <div>
+                <div id="status-biometria" class="small text-muted">Nenhuma biometria cadastrada ainda.</div>
+                <div id="spinner-biometria" class="spinner-border spinner-border-sm text-accent d-none" role="status"></div>
+              </div>
+            </div>
+
+            <input type="hidden" id="func-foto-base64">
+            <input type="hidden" id="func-face-descriptor">
+          </div>
+
+          <div class="modal-footer px-0 pb-0">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" id="btn-salvar-modal" class="btn btn-danger">
+              <i class="fas fa-save me-1"></i> Salvar Colaborador
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Foto Ampliada -->
+<div class="modal fade" id="modal-foto" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content text-center p-3">
+      <h6 id="modal-foto-legenda" class="mb-3 text-light"></h6>
+      <img id="modal-foto-img" src="" alt="Foto" style="max-height:400px;object-fit:contain;border-radius:8px;">
+      <button type="button" class="btn btn-secondary btn-sm mt-3" data-bs-dismiss="modal">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

@@ -33,7 +33,13 @@ os.makedirs("fotos_registros", exist_ok=True)
 os.makedirs("static/css", exist_ok=True)
 os.makedirs("static/js", exist_ok=True)
 
-# Arquivos estáticos e templates
+# Arquivos estáticos da aplicação Firebase
+if os.path.exists("public"):
+    app.mount("/models", StaticFiles(directory="public/models"), name="models")
+    app.mount("/js", StaticFiles(directory="public/js"), name="js")
+    app.mount("/css", StaticFiles(directory="public/css"), name="css")
+
+# Arquivos estáticos e templates antigos
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/fotos", StaticFiles(directory="fotos_funcionarios"), name="fotos")
 
@@ -52,6 +58,24 @@ app.include_router(auth.router)
 app.include_router(funcionarios.router)
 app.include_router(ponto.router)
 app.include_router(relatorios.router)
+
+# Rota raiz: serve o frontend Firebase moderno
+from fastapi.responses import FileResponse
+
+@app.get("/", response_class=FileResponse)
+async def pagina_inicial_firebase():
+    if os.path.exists("public/index.html"):
+        return FileResponse("public/index.html")
+    return HTMLResponse("<h1>Carregando...</h1>")
+
+@app.get("/login.html", response_class=FileResponse)
+async def pagina_login_firebase():
+    return FileResponse("public/login.html")
+
+@app.get("/admin.html", response_class=FileResponse)
+async def pagina_admin_firebase():
+    return FileResponse("public/admin.html")
+
 
 
 def inicializar_dados():

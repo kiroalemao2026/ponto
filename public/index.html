@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Ponto</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ── Tela de carregamento ── -->
+<div id="tela-carregando">
+  <i class="fas fa-clock fa-3x text-accent"></i>
+  <div class="spinner-border" role="status"></div>
+  <p id="msg-carregando">Carregando modelos de reconhecimento facial...</p>
+</div>
+
+<!-- ── Header ── -->
+<header class="ponto-header">
+  <div class="header-brand">
+    <i class="fas fa-clock"></i>
+    <span>Sistema de Ponto</span>
+  </div>
+  <div class="header-relogio">
+    <div id="relogio" class="relogio-digital">00:00:00</div>
+    <div id="data-atual" class="data-texto"></div>
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<main class="ponto-main">
+
+  <!-- ETAPA 1: CPF -->
+  <div id="etapa-cpf" class="hidden">
+    <div class="card-dark text-center" style="max-width:480px;width:100%">
+      <i class="fas fa-id-card fa-3x text-accent mb-3"></i>
+      <h4 class="mb-1">Identificação do Colaborador</h4>
+      <p class="text-muted mb-4" style="font-size:.9rem">Digite seu CPF para liberar o reconhecimento facial</p>
+
+      <input type="text" id="input-cpf" class="form-control form-control-lg mb-3"
+        placeholder="000.000.000-00" maxlength="14" autocomplete="off"
+        oninput="mascaraCPF(this)" onkeydown="if(event.key==='Enter') validarCPF()">
+
+      <div id="alerta-cpf" class="alert alert-danger d-none mb-3" role="alert"></div>
+
+      <button class="btn btn-danger btn-lg w-100" onclick="validarCPF()" id="btn-cpf">
+        <i class="fas fa-arrow-right me-2"></i>Continuar para a Câmera
+      </button>
+    </div>
+  </div>
+
+  <!-- ETAPA 2: Câmera + Reconhecimento -->
+  <div id="etapa-camera" class="hidden w-100">
+    <div class="d-flex flex-wrap gap-4 justify-content-center w-100">
+
+      <!-- Coluna câmera -->
+      <div class="camera-col">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <span class="text-muted" style="font-size:.85rem">Colaborador:</span>
+            <strong class="text-light ms-1" id="nome-sessao"></strong>
+          </div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="voltarCPF()">
+            <i class="fas fa-times"></i> Trocar CPF
+          </button>
+        </div>
+
+        <div class="camera-wrapper">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas-overlay" class="camera-overlay-canvas"></canvas>
+          <div class="camera-status" id="camera-status">
+            <i class="fas fa-spinner fa-spin"></i> Iniciando câmera...
+          </div>
+        </div>
+
+        <div id="status-face" class="text-center mt-2" style="font-size:.85rem; color:var(--text-muted)">
+          Posicione seu rosto no enquadramento
+        </div>
+
+        <!-- Botões de ponto -->
+        <div class="botoes-ponto">
+          <button class="btn-ponto btn-entrada"     onclick="registrarPonto('entrada')"          id="btn-entrada">
+            <i class="fas fa-sign-in-alt"></i><span>ENTRADA</span>
+          </button>
+          <button class="btn-ponto btn-almoco-saida" onclick="registrarPonto('almoco_saida')"    id="btn-almoco-saida">
+            <i class="fas fa-utensils"></i><span>SAÍDA ALMOÇO</span>
+          </button>
+          <button class="btn-ponto btn-almoco-retorno" onclick="registrarPonto('almoco_retorno')" id="btn-almoco-retorno">
+            <i class="fas fa-undo-alt"></i><span>RETORNO ALMOÇO</span>
+          </button>
+          <button class="btn-ponto btn-saida"       onclick="registrarPonto('saida')"            id="btn-saida">
+            <i class="fas fa-sign-out-alt"></i><span>SAÍDA</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Lateral -->
+      <div class="lateral-col">
+        <!-- Resultado -->
+        <div id="card-resultado" class="card-resultado mb-3">
+          <div class="d-flex align-items-center gap-3">
+            <div id="res-icone" style="font-size:2rem"></div>
+            <div>
+              <div id="res-nome" style="font-weight:700;font-size:1.1rem"></div>
+              <div id="res-cargo" style="font-size:.85rem;color:var(--text-muted)"></div>
+              <div id="res-tipo" class="mt-1"></div>
+              <div id="res-hora" style="font-size:.8rem;color:var(--text-muted)"></div>
+              <div id="res-conf" style="font-size:.8rem;color:var(--text-muted)"></div>
+            </div>
+          </div>
+          <div id="res-msg" class="mt-2" style="font-size:.9rem"></div>
+        </div>
+
+        <!-- Feed -->
+        <div class="feed-titulo"><i class="fas fa-list-ul me-1"></i>Últimos Registros</div>
+        <div id="feed-lista" style="max-height:400px;overflow-y:auto"></div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<footer class="ponto-footer">
+  <span>© 2024 Sistema de Ponto Eletrônico</span>
+  <a href="/login.html" class="link-admin"><i class="fas fa-cog me-1"></i>Admin</a>
+</footer>
+
+<!-- Toast -->
+<div class="toast-container position-fixed top-0 end-0 p-3">
+  <div id="toast" class="toast" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toast-msg">Mensagem</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+<script src="/js/ponto.js"></script>
+</body>
+</html>

@@ -110,7 +110,7 @@ def verificar_face(imagem_base64: str, funcionarios: list) -> dict:
 
     melhor_funcionario = None
     maior_similaridade = -1.0
-    LIMIAR_MINIMO_SIMILARIDADE = 0.42
+    LIMIAR_MINIMO_SIMILARIDADE = 0.35
 
     for func in funcionarios:
         if not func.get("encoding_facial"):

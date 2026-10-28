@@ -1,0 +1,227 @@
+/* ============================================================
+   Sistema de Ponto — Dark Theme
+   ============================================================ */
+
+:root {
+  --bg-primary:   #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card:      #1c2333;
+  --accent:       #e94560;
+  --accent-hover: #c73652;
+  --text-light:   #e6edf3;
+  --text-muted:   #8b949e;
+  --border:       #30363d;
+  --success:      #28a745;
+  --warning:      #e6a817;
+  --info:         #17a2b8;
+  --danger:       #dc3545;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-light);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Carregando ─────────────────────────────────────── */
+#tela-carregando {
+  position: fixed; inset: 0;
+  background: var(--bg-primary);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 9999; gap: 1.5rem;
+}
+#tela-carregando .spinner-border {
+  width: 3rem; height: 3rem;
+  border-width: 4px;
+  color: var(--accent);
+}
+#tela-carregando p { color: var(--text-muted); font-size: 1rem; }
+.hidden { display: none !important; }
+
+/* ─── Header ─────────────────────────────────────────── */
+.ponto-header {
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--accent);
+  padding: .75rem 1.5rem;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.header-brand { display: flex; align-items: center; gap: .5rem; color: var(--accent); font-weight: 700; font-size: 1.1rem; }
+.relogio-digital { font-size: 2rem; font-weight: 700; letter-spacing: 3px; font-family: 'Courier New', monospace; }
+.data-texto { font-size: .75rem; color: var(--text-muted); text-align: right; }
+
+/* ─── Main container ─────────────────────────────────── */
+.ponto-main {
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 2rem 1rem; min-height: calc(100vh - 70px - 48px);
+}
+
+/* ─── Cards ──────────────────────────────────────────── */
+.card-dark {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+/* ─── Etapa CPF ──────────────────────────────────────── */
+#etapa-cpf { width: 100%; max-width: 480px; margin: auto; }
+#etapa-cpf input {
+  background: var(--bg-secondary) !important;
+  color: var(--text-light) !important;
+  border-color: var(--border) !important;
+  font-size: 1.3rem; text-align: center; letter-spacing: 2px;
+}
+#etapa-cpf input:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(233,69,96,.25) !important; }
+
+/* ─── Etapa câmera ───────────────────────────────────── */
+#etapa-camera {
+  width: 100%; display: flex;
+  flex-wrap: wrap; gap: 1.5rem; justify-content: center;
+}
+.camera-col { flex: 0 0 auto; width: 360px; }
+.lateral-col { flex: 1 1 320px; max-width: 480px; }
+
+.camera-wrapper {
+  position: relative; background: #000;
+  border-radius: 10px; overflow: hidden;
+  aspect-ratio: 4/3;
+}
+.camera-wrapper video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camera-overlay-canvas {
+  position: absolute; inset: 0; pointer-events: none;
+}
+.camera-status {
+  position: absolute; bottom: .5rem; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.6); color: #fff;
+  font-size: .8rem; padding: .2rem .75rem; border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ─── Botões de ponto ────────────────────────────────── */
+.botoes-ponto { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .75rem; }
+.btn-ponto {
+  display: flex; flex-direction: column; align-items: center;
+  gap: .35rem; padding: .9rem .5rem;
+  border: none; border-radius: 10px; cursor: pointer;
+  font-weight: 700; font-size: .85rem; transition: all .2s;
+  opacity: .4;
+}
+.btn-ponto.liberado { opacity: 1; transform: scale(1.02); }
+.btn-ponto:disabled { cursor: not-allowed; }
+.btn-ponto i { font-size: 1.4rem; }
+.btn-entrada       { background: #28a745; color: #fff; }
+.btn-almoco-saida  { background: #e6a817; color: #000; }
+.btn-almoco-retorno{ background: #17a2b8; color: #fff; }
+.btn-saida         { background: #dc3545; color: #fff; }
+.btn-ponto.liberado:hover { filter: brightness(1.15); }
+
+/* ─── Resultado ──────────────────────────────────────── */
+.card-resultado {
+  background: var(--bg-card); border-radius: 10px;
+  padding: 1.25rem; margin-bottom: 1rem;
+  border-left: 4px solid var(--border);
+  display: none;
+}
+.card-resultado.sucesso { border-left-color: var(--success); }
+.card-resultado.erro    { border-left-color: var(--danger); }
+.card-resultado.visivel { display: block; }
+
+/* ─── Feed ───────────────────────────────────────────── */
+.feed-titulo { color: var(--text-muted); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: .5rem; }
+.feed-item { display: flex; align-items: center; gap: .75rem; padding: .6rem; border-bottom: 1px solid var(--border); }
+.feed-nome { font-weight: 600; font-size: .9rem; }
+.feed-detalhe { font-size: .8rem; color: var(--text-muted); }
+.feed-hora { font-size: .75rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
+
+/* ─── Footer ─────────────────────────────────────────── */
+.ponto-footer {
+  background: var(--bg-secondary); border-top: 1px solid var(--border);
+  padding: .75rem 1.5rem; text-align: center;
+  font-size: .8rem; color: var(--text-muted);
+}
+.link-admin { color: var(--text-muted); text-decoration: none; margin-left: 1rem; }
+.link-admin:hover { color: var(--accent); }
+
+/* ─── Login ──────────────────────────────────────────── */
+.login-box {
+  width: 100%; max-width: 400px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 2.5rem;
+  margin: 5rem auto;
+}
+.login-box input {
+  background: var(--bg-secondary) !important;
+  color: var(--text-light) !important;
+  border-color: var(--border) !important;
+}
+.login-box input:focus { border-color: var(--accent) !important; box-shadow: none !important; }
+
+/* ─── Admin ──────────────────────────────────────────── */
+.admin-sidebar {
+  width: 240px; min-height: 100vh;
+  background: var(--bg-secondary); border-right: 1px solid var(--border);
+  padding: 1.5rem 0; flex-shrink: 0;
+}
+.admin-sidebar .brand { padding: 0 1.25rem 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.nav-item-link {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .7rem 1.25rem; color: var(--text-muted);
+  text-decoration: none; transition: all .2s;
+  border-left: 3px solid transparent;
+}
+.nav-item-link:hover, .nav-item-link.ativo {
+  color: var(--text-light); background: rgba(233,69,96,.1);
+  border-left-color: var(--accent);
+}
+.admin-content { flex: 1; padding: 1.5rem; overflow-y: auto; }
+
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th { background: var(--bg-secondary); color: var(--text-muted); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; padding: .75rem 1rem; text-align: left; }
+.admin-table td { padding: .75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: .9rem; }
+.admin-table tr:hover td { background: rgba(255,255,255,.02); }
+
+.badge-tipo {
+  display: inline-block; padding: .2rem .6rem; border-radius: 4px; font-size: .75rem; font-weight: 600;
+}
+.badge-entrada        { background: rgba(40,167,69,.15); color: #28a745; }
+.badge-almoco_saida   { background: rgba(230,168,23,.15); color: #e6a817; }
+.badge-almoco_retorno { background: rgba(23,162,184,.15); color: #17a2b8; }
+.badge-saida          { background: rgba(220,53,69,.15); color: #dc3545; }
+
+/* ─── Modal câmera admin ─────────────────────────────── */
+.modal-content {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-light) !important;
+}
+.modal-header { border-bottom-color: var(--border) !important; }
+.modal-footer { border-top-color: var(--border) !important; }
+.form-control, .form-select {
+  background: var(--bg-secondary) !important;
+  color: var(--text-light) !important;
+  border-color: var(--border) !important;
+}
+.form-control:focus, .form-select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(233,69,96,.2) !important;
+}
+.form-label { color: var(--text-muted); font-size: .85rem; }
+
+/* ─── Utilitários ────────────────────────────────────── */
+.btn-danger  { background: var(--accent) !important; border-color: var(--accent) !important; }
+.btn-danger:hover { background: var(--accent-hover) !important; }
+.text-accent { color: var(--accent) !important; }
+.border-accent { border-color: var(--accent) !important; }
+
+/* ─── Responsivo ─────────────────────────────────────── */
+@media (max-width: 576px) {
+  .camera-col { width: 100%; }
+  .relogio-digital { font-size: 1.4rem; }
+  .admin-sidebar { width: 100%; min-height: auto; }
+}
