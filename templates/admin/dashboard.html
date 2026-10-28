@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Administração{% endblock %}
+
+{% block body %}
+<div class="admin-layout">
+    <!-- Sidebar -->
+    <nav class="admin-sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-clock"></i>
+            <span>PontoSystem</span>
+        </div>
+        <div class="sidebar-admin-nome" id="sidebar-nome">Carregando...</div>
+        <ul class="sidebar-nav">
+            <li class="nav-item active">
+                <a href="/admin"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+            </li>
+            <li class="nav-item">
+                <a href="/admin/funcionarios"><i class="fas fa-users"></i> Funcionários</a>
+            </li>
+            <li class="nav-item">
+                <a href="/admin/relatorios"><i class="fas fa-chart-bar"></i> Relatórios</a>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <a href="/" class="sidebar-link"><i class="fas fa-desktop"></i> Tela de Ponto</a>
+            <button onclick="fazerLogout()" class="btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Sair
+            </button>
+        </div>
+    </nav>
+
+    <!-- Conteúdo principal -->
+    <div class="admin-content">
+        <div class="admin-topbar">
+            <h4><i class="fas fa-tachometer-alt"></i> Dashboard</h4>
+            <div class="topbar-right">
+                <span class="text-muted" id="topbar-data"></span>
+            </div>
+        </div>
+
+        <!-- Cards de estatísticas -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="stat-card stat-blue">
+                    <div class="stat-icon"><i class="fas fa-users"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="stat-total">-</div>
+                        <div class="stat-label">Total Funcionários</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-green">
+                    <div class="stat-icon"><i class="fas fa-user-check"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="stat-presentes">-</div>
+                        <div class="stat-label">Presentes Hoje</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-red">
+                    <div class="stat-icon"><i class="fas fa-user-times"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="stat-ausentes">-</div>
+                        <div class="stat-label">Ausentes Hoje</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-orange">
+                    <div class="stat-icon"><i class="fas fa-clipboard-list"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="stat-registros">-</div>
+                        <div class="stat-label">Registros Hoje</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Últimos registros -->
+            <div class="col-lg-7">
+                <div class="admin-card">
+                    <div class="admin-card-header">
+                        <h5><i class="fas fa-history"></i> Últimos Registros</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="carregarUltimos()">
+                            <i class="fas fa-sync"></i>
+                        </button>
+                    </div>
+                    <div class="admin-card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Funcionário</th>
+                                        <th>Tipo</th>
+                                        <th>Horário</th>
+                                        <th>Confiança</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-ultimos">
+                                    <tr><td colspan="4" class="text-center py-3">
+                                        <i class="fas fa-spinner fa-spin"></i> Carregando...
+                                    </td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gráfico da semana -->
+            <div class="col-lg-5">
+                <div class="admin-card">
+                    <div class="admin-card-header">
+                        <h5><i class="fas fa-chart-bar"></i> Entradas por Dia (7 dias)</h5>
+                    </div>
+                    <div class="admin-card-body">
+                        <canvas id="grafico-semana" height="220"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+<script>
+    verificarAuth();
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const nome = localStorage.getItem('ponto_admin_nome') || 'Admin';
+        document.getElementById('sidebar-nome').textContent = nome;
+
+        const agora = new Date();
+        document.getElementById('topbar-data').textContent = agora.toLocaleDateString('pt-BR', {
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+        });
+
+        carregarStats();
+        carregarUltimos();
+        carregarGrafico();
+
+        setInterval(carregarUltimos, 30000);
+        setInterval(carregarStats, 60000);
+    });
+
+    async function carregarStats() {
+        try {
+            const r = await fetchAuth('/api/ponto/stats/hoje');
+            if (r.ok) {
+                const d = await r.json();
+                document.getElementById('stat-total').textContent = d.total_funcionarios;
+                document.getElementById('stat-presentes').textContent = d.presentes_hoje;
+                document.getElementById('stat-ausentes').textContent = d.ausentes_hoje;
+                document.getElementById('stat-registros').textContent = d.total_registros_hoje;
+            }
+        } catch(e) {}
+    }
+
+    async function carregarUltimos() {
+        try {
+            const r = await fetchAuth('/api/ponto/ultimos');
+            if (!r.ok) return;
+            const registros = await r.json();
+            const tbody = document.getElementById('tabela-ultimos');
+
+            if (!registros.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Nenhum registro encontrado</td></tr>';
+                return;
+            }
+
+            const tipoClasse = {
+                entrada: 'badge-entrada', saida: 'badge-saida',
+                almoco_saida: 'badge-almoco', almoco_retorno: 'badge-retorno'
+            };
+
+            tbody.innerHTML = registros.map(r => `
+                <tr>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            ${r.foto_base64 ? `<img src="${r.foto_base64}" class="avatar-sm rounded-circle">` : '<div class="avatar-sm bg-secondary rounded-circle d-flex align-items-center justify-content-center"><i class="fas fa-user text-white" style="font-size:10px"></i></div>'}
+                            <div>
+                                <div class="fw-semibold">${r.funcionario_nome}</div>
+                                <small class="text-muted">${r.cargo}</small>
+                            </div>
+                        </div>
+                    </td>
+                    <td><span class="badge ${tipoClasse[r.tipo] || 'bg-secondary'}">${r.tipo_label}</span></td>
+                    <td><small>${r.timestamp}</small></td>
+                    <td>
+                        ${r.confianca ? `<span class="text-success">${r.confianca}%</span>` : '-'}
+                    </td>
+                </tr>
+            `).join('');
+        } catch(e) {}
+    }
+
+    let graficoChart = null;
+    async function carregarGrafico() {
+        try {
+            const r = await fetchAuth('/api/relatorios/semana');
+            if (!r.ok) return;
+            const dados = await r.json();
+
+            const ctx = document.getElementById('grafico-semana').getContext('2d');
+            if (graficoChart) graficoChart.destroy();
+
+            graficoChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dados.map(d => d.dia + ' ' + d.dia_semana),
+                    datasets: [{
+                        label: 'Entradas',
+                        data: dados.map(d => d.total),
+                        backgroundColor: 'rgba(233, 69, 96, 0.7)',
+                        borderColor: 'rgba(233, 69, 96, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { labels: { color: '#aaa' } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                        y: { ticks: { color: '#aaa', stepSize: 1 }, grid: { color: '#333' }, beginAtZero: true }
+                    }
+                }
+            });
+        } catch(e) {}
+    }
+</script>
+{% endblock %}

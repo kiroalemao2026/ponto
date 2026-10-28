@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+{% block title %}Funcionários - Administração{% endblock %}
+
+{% block body %}
+<div class="admin-layout">
+    <!-- Sidebar -->
+    <nav class="admin-sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-clock"></i>
+            <span>PontoSystem</span>
+        </div>
+        <div class="sidebar-admin-nome" id="sidebar-nome">Carregando...</div>
+        <ul class="sidebar-nav">
+            <li class="nav-item">
+                <a href="/admin"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+            </li>
+            <li class="nav-item active">
+                <a href="/admin/funcionarios"><i class="fas fa-users"></i> Funcionários</a>
+            </li>
+            <li class="nav-item">
+                <a href="/admin/relatorios"><i class="fas fa-chart-bar"></i> Relatórios</a>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <a href="/" class="sidebar-link"><i class="fas fa-desktop"></i> Tela de Ponto</a>
+            <button onclick="fazerLogout()" class="btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Sair
+            </button>
+        </div>
+    </nav>
+
+    <!-- Conteúdo -->
+    <div class="admin-content">
+        <div class="admin-topbar">
+            <h4><i class="fas fa-users"></i> Funcionários</h4>
+            <button class="btn btn-danger" onclick="abrirModalNovo()">
+                <i class="fas fa-plus"></i> Novo Funcionário
+            </button>
+        </div>
+
+        <!-- Alertas -->
+        <div id="alerta-func" class="alert d-none mb-3" role="alert"></div>
+
+        <!-- Tabela -->
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <h5><i class="fas fa-list"></i> Lista de Funcionários</h5>
+                <div class="d-flex gap-2 align-items-center">
+                    <input type="search" class="form-control form-control-sm bg-dark border-secondary text-light"
+                           id="busca-func" placeholder="Buscar..." oninput="filtrarTabela(this.value)" style="width:200px">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="carregarFuncionarios()">
+                        <i class="fas fa-sync"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="admin-card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0" id="tabela-funcionarios">
+                        <thead>
+                            <tr>
+                                <th>Foto</th>
+                                <th>Nome</th>
+                                <th>CPF</th>
+                                <th>Cargo</th>
+                                <th>Departamento</th>
+                                <th>Facial</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-funcionarios">
+                            <tr><td colspan="8" class="text-center py-3">
+                                <i class="fas fa-spinner fa-spin"></i> Carregando...
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Novo/Editar Funcionário -->
+<div class="modal fade" id="modal-funcionario" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-light" id="modal-titulo">Novo Funcionário</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="form-funcionario" onsubmit="salvarFuncionario(event)">
+                    <input type="hidden" id="func-id" value="">
+
+                    <div class="row g-3">
+                        <!-- Coluna de dados -->
+                        <div class="col-md-7">
+                            <div class="mb-3">
+                                <label class="form-label text-light">Nome Completo *</label>
+                                <input type="text" class="form-control bg-dark border-secondary text-light"
+                                       id="func-nome" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-light">CPF *</label>
+                                <input type="text" class="form-control bg-dark border-secondary text-light"
+                                       id="func-cpf" placeholder="000.000.000-00"
+                                       maxlength="14" oninput="mascara_cpf(this)" required>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-light">Cargo *</label>
+                                    <input type="text" class="form-control bg-dark border-secondary text-light"
+                                           id="func-cargo" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-light">Departamento *</label>
+                                    <input type="text" class="form-control bg-dark border-secondary text-light"
+                                           id="func-departamento" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-light">E-mail</label>
+                                <input type="email" class="form-control bg-dark border-secondary text-light"
+                                       id="func-email">
+                            </div>
+                        </div>
+
+                        <!-- Coluna de foto -->
+                        <div class="col-md-5">
+                            <label class="form-label text-light">Foto para Reconhecimento Facial *</label>
+                            <div class="foto-upload-area">
+                                <div id="preview-foto-wrapper">
+                                    <img id="preview-foto" src="" alt="Preview" class="preview-foto d-none">
+                                    <div id="placeholder-foto" class="placeholder-foto">
+                                        <i class="fas fa-user-circle fa-4x text-muted"></i>
+                                        <p class="text-muted mt-2">Nenhuma foto</p>
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2 mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary flex-fill"
+                                            onclick="document.getElementById('input-foto-file').click()">
+                                        <i class="fas fa-upload"></i> Upload
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-info flex-fill"
+                                            onclick="abrirCameraModal()">
+                                        <i class="fas fa-camera"></i> Câmera
+                                    </button>
+                                </div>
+                                <input type="file" id="input-foto-file" accept="image/*" class="d-none"
+                                       onchange="previewFotoArquivo(this)">
+                                <input type="hidden" id="func-foto-base64">
+                            </div>
+
+                            <!-- Câmera dentro do modal -->
+                            <div id="camera-modal-area" class="d-none mt-2">
+                                <video id="video-modal" autoplay playsinline muted class="w-100 rounded"></video>
+                                <canvas id="canvas-modal" class="d-none"></canvas>
+                                <div class="d-flex gap-2 mt-2">
+                                    <button type="button" class="btn btn-sm btn-success flex-fill"
+                                            onclick="capturarFotoModal()">
+                                        <i class="fas fa-camera"></i> Capturar
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-secondary flex-fill"
+                                            onclick="fecharCameraModal()">
+                                        <i class="fas fa-times"></i> Cancelar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="alerta-modal" class="alert d-none mt-2"></div>
+                </form>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="form-funcionario" class="btn btn-danger" id="btn-salvar">
+                    <i class="fas fa-save"></i> Salvar Funcionário
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Editar -->
+<div class="modal fade" id="modal-editar" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-light">Editar Funcionário</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-id">
+                <div class="mb-3">
+                    <label class="form-label text-light">Nome</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="edit-nome">
+                </div>
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <label class="form-label text-light">Cargo</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="edit-cargo">
+                    </div>
+                    <div class="col-6 mb-3">
+                        <label class="form-label text-light">Departamento</label>
+                        <input type="text" class="form-control bg-dark border-secondary text-light" id="edit-departamento">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-light">E-mail</label>
+                    <input type="email" class="form-control bg-dark border-secondary text-light" id="edit-email">
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-danger" onclick="salvarEdicao()">
+                    <i class="fas fa-save"></i> Salvar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+<script>
+    verificarAuth();
+    document.getElementById('sidebar-nome').textContent = localStorage.getItem('ponto_admin_nome') || 'Admin';
+
+    let todosFuncionarios = [];
+    let streamModal = null;
+
+    document.addEventListener('DOMContentLoaded', carregarFuncionarios);
+
+    async function carregarFuncionarios() {
+        const r = await fetchAuth('/api/funcionarios');
+        if (!r.ok) return;
+        todosFuncionarios = await r.json();
+        renderizarTabela(todosFuncionarios);
+    }
+
+    function formatarCPF(cpf) {
+        cpf = cpf.replace(/\D/g, '');
+        return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    }
+
+    function renderizarTabela(lista) {
+        const tbody = document.getElementById('tbody-funcionarios');
+        if (!lista.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Nenhum funcionário cadastrado</td></tr>';
+            return;
+        }
+        tbody.innerHTML = lista.map(f => `
+            <tr>
+                <td>
+                    ${f.foto_base64
+                        ? `<img src="${f.foto_base64}" class="avatar-md rounded-circle">`
+                        : `<div class="avatar-md bg-secondary rounded-circle d-flex align-items-center justify-content-center"><i class="fas fa-user text-white"></i></div>`
+                    }
+                </td>
+                <td><strong>${f.nome}</strong></td>
+                <td>${formatarCPF(f.cpf)}</td>
+                <td>${f.cargo}</td>
+                <td>${f.departamento}</td>
+                <td>
+                    ${f.tem_encoding
+                        ? '<span class="badge bg-success"><i class="fas fa-check"></i> OK</span>'
+                        : '<span class="badge bg-warning text-dark"><i class="fas fa-exclamation"></i> Sem dados</span>'
+                    }
+                </td>
+                <td>
+                    <span class="badge ${f.ativo ? 'bg-success' : 'bg-secondary'}">
+                        ${f.ativo ? 'Ativo' : 'Inativo'}
+                    </span>
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-info" onclick='abrirEdicao(${JSON.stringify(f)})' title="Editar">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-outline-${f.ativo ? 'warning' : 'success'}"
+                                onclick="toggleAtivo(${f.id}, '${f.nome}')" title="${f.ativo ? 'Desativar' : 'Ativar'}">
+                            <i class="fas fa-${f.ativo ? 'ban' : 'check'}"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function filtrarTabela(termo) {
+        const filtrados = todosFuncionarios.filter(f =>
+            f.nome.toLowerCase().includes(termo.toLowerCase()) ||
+            f.cpf.includes(termo) ||
+            f.cargo.toLowerCase().includes(termo.toLowerCase()) ||
+            f.departamento.toLowerCase().includes(termo.toLowerCase())
+        );
+        renderizarTabela(filtrados);
+    }
+
+    function abrirModalNovo() {
+        document.getElementById('func-id').value = '';
+        document.getElementById('form-funcionario').reset();
+        document.getElementById('func-foto-base64').value = '';
+        document.getElementById('preview-foto').classList.add('d-none');
+        document.getElementById('placeholder-foto').classList.remove('d-none');
+        document.getElementById('modal-titulo').textContent = 'Novo Funcionário';
+        document.getElementById('alerta-modal').classList.add('d-none');
+        fecharCameraModal();
+        new bootstrap.Modal(document.getElementById('modal-funcionario')).show();
+    }
+
+    function previewFotoArquivo(input) {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const base64 = e.target.result;
+            document.getElementById('func-foto-base64').value = base64;
+            document.getElementById('preview-foto').src = base64;
+            document.getElementById('preview-foto').classList.remove('d-none');
+            document.getElementById('placeholder-foto').classList.add('d-none');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function abrirCameraModal() {
+        document.getElementById('camera-modal-area').classList.remove('d-none');
+        try {
+            streamModal = await navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300 } });
+            document.getElementById('video-modal').srcObject = streamModal;
+        } catch(e) {
+            alert('Não foi possível acessar a câmera: ' + e.message);
+        }
+    }
+
+    function fecharCameraModal() {
+        if (streamModal) {
+            streamModal.getTracks().forEach(t => t.stop());
+            streamModal = null;
+        }
+        document.getElementById('camera-modal-area').classList.add('d-none');
+    }
+
+    function capturarFotoModal() {
+        const video = document.getElementById('video-modal');
+        const canvas = document.getElementById('canvas-modal');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const base64 = canvas.toDataURL('image/jpeg', 0.9);
+        document.getElementById('func-foto-base64').value = base64;
+        document.getElementById('preview-foto').src = base64;
+        document.getElementById('preview-foto').classList.remove('d-none');
+        document.getElementById('placeholder-foto').classList.add('d-none');
+        fecharCameraModal();
+    }
+
+    function mascara_cpf(input) {
+        let v = input.value.replace(/\D/g, '');
+        if (v.length > 11) v = v.slice(0, 11);
+        v = v.replace(/(\d{3})(\d)/, '$1.$2');
+        v = v.replace(/(\d{3})(\d)/, '$1.$2');
+        v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+        input.value = v;
+    }
+
+    async function salvarFuncionario(e) {
+        e.preventDefault();
+        const fotoBase64 = document.getElementById('func-foto-base64').value;
+        if (!fotoBase64) {
+            mostrarAlertaModal('danger', 'Por favor, adicione uma foto do funcionário para o reconhecimento facial.');
+            return;
+        }
+
+        const btn = document.getElementById('btn-salvar');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Salvando...';
+
+        const formData = new FormData();
+        formData.append('nome', document.getElementById('func-nome').value);
+        formData.append('cpf', document.getElementById('func-cpf').value);
+        formData.append('cargo', document.getElementById('func-cargo').value);
+        formData.append('departamento', document.getElementById('func-departamento').value);
+        formData.append('email', document.getElementById('func-email').value || '');
+        formData.append('foto_base64', fotoBase64);
+
+        try {
+            const r = await fetchAuth('/api/funcionarios', { method: 'POST', body: formData });
+            const dados = await r.json();
+
+            if (r.ok && dados.sucesso) {
+                bootstrap.Modal.getInstance(document.getElementById('modal-funcionario')).hide();
+                mostrarAlerta('success', dados.mensagem);
+                carregarFuncionarios();
+            } else {
+                mostrarAlertaModal('danger', dados.detail || dados.mensagem || 'Erro ao salvar');
+            }
+        } catch(err) {
+            mostrarAlertaModal('danger', 'Erro de conexão com o servidor');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Salvar Funcionário';
+        }
+    }
+
+    function abrirEdicao(f) {
+        document.getElementById('edit-id').value = f.id;
+        document.getElementById('edit-nome').value = f.nome;
+        document.getElementById('edit-cargo').value = f.cargo;
+        document.getElementById('edit-departamento').value = f.departamento;
+        document.getElementById('edit-email').value = f.email || '';
+        new bootstrap.Modal(document.getElementById('modal-editar')).show();
+    }
+
+    async function salvarEdicao() {
+        const id = document.getElementById('edit-id').value;
+        const dados = {
+            nome: document.getElementById('edit-nome').value,
+            cargo: document.getElementById('edit-cargo').value,
+            departamento: document.getElementById('edit-departamento').value,
+            email: document.getElementById('edit-email').value
+        };
+        const r = await fetchAuth(`/api/funcionarios/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dados)
+        });
+        if (r.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('modal-editar')).hide();
+            mostrarAlerta('success', 'Funcionário atualizado com sucesso!');
+            carregarFuncionarios();
+        }
+    }
+
+    async function toggleAtivo(id, nome) {
+        if (!confirm(`Deseja alterar o status de ${nome}?`)) return;
+        const r = await fetchAuth(`/api/funcionarios/${id}`, { method: 'DELETE' });
+        if (r.ok) {
+            const d = await r.json();
+            mostrarAlerta('success', d.mensagem);
+            carregarFuncionarios();
+        }
+    }
+
+    function mostrarAlerta(tipo, msg) {
+        const el = document.getElementById('alerta-func');
+        el.className = `alert alert-${tipo}`;
+        el.innerHTML = `<i class="fas fa-${tipo === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${msg}`;
+        el.classList.remove('d-none');
+        setTimeout(() => el.classList.add('d-none'), 5000);
+    }
+
+    function mostrarAlertaModal(tipo, msg) {
+        const el = document.getElementById('alerta-modal');
+        el.className = `alert alert-${tipo}`;
+        el.textContent = msg;
+        el.classList.remove('d-none');
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Registro de Ponto{% endblock %}
+
+{% block body %}
+<div class="ponto-container">
+    <!-- Header -->
+    <header class="ponto-header">
+        <div class="header-brand">
+            <i class="fas fa-clock"></i>
+            <span>Sistema de Ponto</span>
+        </div>
+        <div class="header-relogio">
+            <div id="relogio" class="relogio-digital">00:00:00</div>
+            <div id="data-atual" class="data-texto"></div>
+        </div>
+    </header>
+
+    <!-- Conteúdo principal -->
+    <main class="ponto-main">
+        <!-- Coluna da câmera -->
+        <div class="camera-section">
+            <div class="camera-wrapper">
+                <div class="camera-overlay">
+                    <video id="video-camera" autoplay playsinline muted></video>
+                    <canvas id="canvas-captura" style="display:none;"></canvas>
+                    <div class="camera-frame"></div>
+                    <div class="camera-status" id="camera-status">
+                        <i class="fas fa-camera"></i> Câmera ativa
+                    </div>
+                </div>
+                <div id="flash-efeito" class="flash-efeito"></div>
+            </div>
+
+            <!-- Botões de registro -->
+            <div class="botoes-ponto">
+                <button class="btn-ponto btn-entrada" onclick="registrarPonto('entrada')" id="btn-entrada">
+                    <i class="fas fa-sign-in-alt"></i>
+                    <span>Entrada</span>
+                </button>
+                <button class="btn-ponto btn-almoco-saida" onclick="registrarPonto('almoco_saida')" id="btn-almoco-saida">
+                    <i class="fas fa-utensils"></i>
+                    <span>Saída Almoço</span>
+                </button>
+                <button class="btn-ponto btn-almoco-retorno" onclick="registrarPonto('almoco_retorno')" id="btn-almoco-retorno">
+                    <i class="fas fa-undo-alt"></i>
+                    <span>Retorno Almoço</span>
+                </button>
+                <button class="btn-ponto btn-saida" onclick="registrarPonto('saida')" id="btn-saida">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Saída</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Coluna lateral: resultado + feed -->
+        <div class="lateral-section">
+            <!-- Card de resultado -->
+            <div id="card-resultado" class="card-resultado oculto">
+                <div id="resultado-sucesso" class="resultado-body">
+                    <div class="resultado-foto">
+                        <img id="resultado-foto-img" src="" alt="Foto">
+                    </div>
+                    <div class="resultado-info">
+                        <div id="resultado-nome" class="resultado-nome"></div>
+                        <div id="resultado-cargo" class="resultado-cargo"></div>
+                        <div id="resultado-tipo" class="resultado-tipo"></div>
+                        <div id="resultado-hora" class="resultado-hora"></div>
+                        <div id="resultado-confianca" class="resultado-confianca"></div>
+                    </div>
+                </div>
+                <div id="resultado-icone" class="resultado-icone"></div>
+                <div id="resultado-mensagem" class="resultado-mensagem"></div>
+            </div>
+
+            <!-- Processando -->
+            <div id="card-processando" class="card-processando oculto">
+                <div class="spinner-border text-light" role="status"></div>
+                <p>Identificando funcionário...</p>
+            </div>
+
+            <!-- Feed de últimos registros -->
+            <div class="feed-section">
+                <h6 class="feed-titulo">
+                    <i class="fas fa-list-ul"></i> Últimos Registros
+                </h6>
+                <div id="feed-registros" class="feed-lista">
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-spinner fa-spin"></i> Carregando...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="ponto-footer">
+        <span>© 2024 Sistema de Ponto Eletrônico</span>
+        <a href="/login" class="link-admin">
+            <i class="fas fa-cog"></i> Administração
+        </a>
+    </footer>
+</div>
+
+<!-- Toast de erro da câmera -->
+<div class="toast-container position-fixed top-0 end-0 p-3">
+    <div id="toast-camera" class="toast align-items-center text-bg-danger" role="alert">
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span id="toast-msg">Erro ao acessar câmera</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/camera.js"></script>
+<script>
+    // Inicia câmera e relógio ao carregar
+    document.addEventListener('DOMContentLoaded', function() {
+        iniciarRelogio();
+        initCamera();
+        carregarFeed();
+        setInterval(carregarFeed, 30000);
+    });
+</script>
+{% endblock %}

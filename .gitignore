@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+ponto.db
+cert.pem
+key.pem
+fotos_registros/
+.vscode/
+.idea/

@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+{% block title %}Relatórios - Administração{% endblock %}
+
+{% block body %}
+<div class="admin-layout">
+    <nav class="admin-sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-clock"></i>
+            <span>PontoSystem</span>
+        </div>
+        <div class="sidebar-admin-nome" id="sidebar-nome">Carregando...</div>
+        <ul class="sidebar-nav">
+            <li class="nav-item">
+                <a href="/admin"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+            </li>
+            <li class="nav-item">
+                <a href="/admin/funcionarios"><i class="fas fa-users"></i> Funcionários</a>
+            </li>
+            <li class="nav-item active">
+                <a href="/admin/relatorios"><i class="fas fa-chart-bar"></i> Relatórios</a>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <a href="/" class="sidebar-link"><i class="fas fa-desktop"></i> Tela de Ponto</a>
+            <button onclick="fazerLogout()" class="btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Sair
+            </button>
+        </div>
+    </nav>
+
+    <div class="admin-content">
+        <div class="admin-topbar">
+            <h4><i class="fas fa-chart-bar"></i> Relatórios e Gestão de Ponto</h4>
+        </div>
+
+        <!-- Filtros -->
+        <div class="admin-card mb-4">
+            <div class="admin-card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label text-light">Mês</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="filtro-mes">
+                            <option value="1">Janeiro</option><option value="2">Fevereiro</option>
+                            <option value="3">Março</option><option value="4">Abril</option>
+                            <option value="5">Maio</option><option value="6">Junho</option>
+                            <option value="7">Julho</option><option value="8">Agosto</option>
+                            <option value="9">Setembro</option><option value="10">Outubro</option>
+                            <option value="11">Novembro</option><option value="12">Dezembro</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label text-light">Ano</label>
+                        <input type="number" class="form-control bg-dark border-secondary text-light"
+                               id="filtro-ano" min="2020" max="2030">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label text-light">Funcionário</label>
+                        <select class="form-select bg-dark border-secondary text-light" id="filtro-funcionario">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-danger w-100" onclick="gerarRelatorio()">
+                            <i class="fas fa-search"></i> Gerar Relatório
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cards resumo -->
+        <div class="row g-3 mb-4" id="cards-resumo" style="display:none!important">
+            <div class="col-md-3">
+                <div class="stat-card stat-blue">
+                    <div class="stat-icon"><i class="fas fa-calendar-check"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="resumo-total">0</div>
+                        <div class="stat-label">Dias Apurados</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-green">
+                    <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="resumo-presencas">0</div>
+                        <div class="stat-label">Presenças / Ajustados</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-orange">
+                    <div class="stat-icon"><i class="fas fa-notes-medical"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="resumo-atestados">0</div>
+                        <div class="stat-label">Atestados / Justificados</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card stat-red">
+                    <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-numero" id="resumo-faltas">0</div>
+                        <div class="stat-label">Faltas Sem Justificativa</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabela de relatório -->
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <h5><i class="fas fa-table"></i> Registros de Ponto Diários</h5>
+                <button class="btn btn-sm btn-success" onclick="exportarCSV()" id="btn-exportar" style="display:none">
+                    <i class="fas fa-file-csv"></i> Exportar CSV
+                </button>
+            </div>
+            <div class="admin-card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Funcionário</th>
+                                <th>Data</th>
+                                <th>Situação</th>
+                                <th>Entrada</th>
+                                <th>Saída Almoço</th>
+                                <th>Retorno Almoço</th>
+                                <th>Saída</th>
+                                <th>Total</th>
+                                <th>Ação (Corrigir)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-relatorio">
+                            <tr><td colspan="9" class="text-center text-muted py-4">
+                                Selecione os filtros e clique em "Gerar Relatório"
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE CORREÇÃO / ATESTADO -->
+<div class="modal fade" id="modal-ajuste" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title text-light" id="modal-ajuste-titulo">
+                    <i class="fas fa-user-edit text-warning"></i> Ajustar Ponto / Atestado
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="ajuste-func-id">
+                <input type="hidden" id="ajuste-data-iso">
+
+                <div class="mb-3 text-muted" id="ajuste-info-colaborador"></div>
+
+                <div class="mb-3">
+                    <label class="form-label text-light">Tipo de Lançamento *</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="ajuste-tipo" onchange="alternarTipoAjuste()">
+                        <option value="manual">Ajustar / Inserir Horários Esquecidos</option>
+                        <option value="atestado">Lançar Atestado Médico (Abonado)</option>
+                        <option value="falta_justificada">Falta Justificada (Sem desconto)</option>
+                    </select>
+                </div>
+
+                <div class="mb-3" id="campo-motivo">
+                    <label class="form-label text-light">Motivo / CID / Observação</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" 
+                           id="ajuste-motivo" placeholder="Ex: Atestado 1 dia Dr. Silva (CID J06) ou Esquecimento">
+                </div>
+
+                <!-- Campos de horário -->
+                <div id="secao-horarios" class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label text-light"><small>Entrada</small></label>
+                        <input type="time" class="form-control bg-dark border-secondary text-light" id="ajuste-entrada">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label text-light"><small>Saída Almoço</small></label>
+                        <input type="time" class="form-control bg-dark border-secondary text-light" id="ajuste-almoco-s">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label text-light"><small>Retorno Almoço</small></label>
+                        <input type="time" class="form-control bg-dark border-secondary text-light" id="ajuste-almoco-r">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label text-light"><small>Saída</small></label>
+                        <input type="time" class="form-control bg-dark border-secondary text-light" id="ajuste-saida">
+                    </div>
+                </div>
+
+                <div id="alerta-ajuste" class="alert d-none"></div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" onclick="salvarAjustePonto()" id="btn-salvar-ajuste">
+                    <i class="fas fa-save"></i> Salvar Correção
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin.js"></script>
+<script>
+    verificarAuth();
+    document.getElementById('sidebar-nome').textContent = localStorage.getItem('ponto_admin_nome') || 'Admin';
+
+    const agora = new Date();
+    document.getElementById('filtro-mes').value = agora.getMonth() + 1;
+    document.getElementById('filtro-ano').value = agora.getFullYear();
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        const r = await fetchAuth('/api/funcionarios');
+        if (r.ok) {
+            const lista = await r.json();
+            const select = document.getElementById('filtro-funcionario');
+            lista.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.id;
+                opt.textContent = f.nome;
+                select.appendChild(opt);
+            });
+        }
+        gerarRelatorio();
+    });
+
+    function formatarCampoHorario(valor) {
+        if (!valor || valor === 'FALTA') {
+            return '<span class="badge bg-danger">FALTA</span>';
+        }
+        if (valor === 'Sem Registro' || valor === '-') {
+            return '<span class="badge bg-secondary text-warning" style="font-size: 0.72rem;"><i class="fas fa-exclamation-triangle"></i> Sem Registro</span>';
+        }
+        if (valor === 'Atestado' || valor === 'Justificada') {
+            return '<span class="badge bg-info text-dark">' + valor + '</span>';
+        }
+        return '<span class="text-light fw-bold"><i class="fas fa-clock text-info"></i> ' + valor + '</span>';
+    }
+
+    let dadosAtuaisRelatorio = [];
+
+    async function gerarRelatorio() {
+        const mes = document.getElementById('filtro-mes').value;
+        const ano = document.getElementById('filtro-ano').value;
+        const funcId = document.getElementById('filtro-funcionario').value;
+
+        let url = `/api/relatorios/mensal?mes=${mes}&ano=${ano}`;
+        if (funcId) url += `&funcionario_id=${funcId}`;
+
+        const tbody = document.getElementById('tbody-relatorio');
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Carregando...</td></tr>';
+
+        try {
+            const r = await fetchAuth(url);
+            if (!r.ok) { tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-3">Erro ao carregar relatório</td></tr>'; return; }
+            const dados = await r.json();
+            dadosAtuaisRelatorio = dados.registros;
+
+            document.getElementById('resumo-total').textContent = dados.total_registros;
+            document.getElementById('resumo-presencas').textContent = dados.total_presencas;
+            document.getElementById('resumo-atestados').textContent = dados.total_atestados;
+            document.getElementById('resumo-faltas').textContent = dados.total_faltas;
+            document.getElementById('cards-resumo').style.display = 'flex';
+            document.getElementById('btn-exportar').style.display = 'block';
+
+            if (!dados.registros.length) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Nenhum registro no período selecionado</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = dados.registros.map((r, index) => {
+                let badgeStatus = '<span class="badge bg-success"><i class="fas fa-user-check"></i> Presente</span>';
+                if (r.status === 'FALTA') {
+                    badgeStatus = '<span class="badge bg-danger"><i class="fas fa-user-times"></i> FALTA</span>';
+                } else if (r.status === 'Atestado Médico') {
+                    badgeStatus = '<span class="badge bg-info text-dark"><i class="fas fa-file-medical"></i> Atestado</span>';
+                } else if (r.status === 'Falta Justificada') {
+                    badgeStatus = '<span class="badge bg-warning text-dark"><i class="fas fa-check"></i> Justificada</span>';
+                } else if (r.status === 'Ajustado (ADM)') {
+                    badgeStatus = '<span class="badge bg-primary"><i class="fas fa-pen"></i> Ajustado</span>';
+                }
+
+                return `
+                <tr>
+                    <td>
+                        <div>
+                            <strong>${r.funcionario_nome}</strong>
+                            <br><small class="text-muted">${r.cargo}</small>
+                            ${r.motivo ? `<br><small class="text-info"><i class="fas fa-info-circle"></i> ${r.motivo}</small>` : ''}
+                        </div>
+                    </td>
+                    <td>${r.data}</td>
+                    <td>${badgeStatus}</td>
+                    <td>${formatarCampoHorario(r.entrada)}</td>
+                    <td>${formatarCampoHorario(r.almoco_saida)}</td>
+                    <td>${formatarCampoHorario(r.almoco_retorno)}</td>
+                    <td>${formatarCampoHorario(r.saida)}</td>
+                    <td><span class="badge bg-secondary">${r.total_horas}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-warning" onclick="abrirModalCorrecao(${index})" title="Corrigir ponto ou lançar atestado">
+                            <i class="fas fa-edit"></i> Corrigir
+                        </button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-3">Erro de conexão</td></tr>';
+        }
+    }
+
+    function abrirModalCorrecao(index) {
+        const item = dadosAtuaisRelatorio[index];
+        document.getElementById('ajuste-func-id').value = item.funcionario_id;
+        document.getElementById('ajuste-data-iso').value = item.data_iso || item.data;
+        document.getElementById('ajuste-info-colaborador').innerHTML = `
+            <strong>Colaborador:</strong> ${item.funcionario_nome}<br>
+            <strong>Data da Folha:</strong> ${item.data}
+        `;
+
+        document.getElementById('ajuste-motivo').value = item.motivo || '';
+        
+        function limparHorario(val) {
+            if (!val || val.includes('FALTA') || val.includes('Sem') || val.includes('Atestado') || val.includes('Just')) return '';
+            return val.trim();
+        }
+
+        document.getElementById('ajuste-entrada').value = limparHorario(item.entrada);
+        document.getElementById('ajuste-almoco-s').value = limparHorario(item.almoco_saida);
+        document.getElementById('ajuste-almoco-r').value = limparHorario(item.almoco_retorno);
+        document.getElementById('ajuste-saida').value = limparHorario(item.saida);
+
+        if (item.status === 'Atestado Médico') {
+            document.getElementById('ajuste-tipo').value = 'atestado';
+        } else if (item.status === 'Falta Justificada') {
+            document.getElementById('ajuste-tipo').value = 'falta_justificada';
+        } else {
+            document.getElementById('ajuste-tipo').value = 'manual';
+        }
+
+        alternarTipoAjuste();
+        document.getElementById('alerta-ajuste').classList.add('d-none');
+        new bootstrap.Modal(document.getElementById('modal-ajuste')).show();
+    }
+
+    function alternarTipoAjuste() {
+        const tipo = document.getElementById('ajuste-tipo').value;
+        const secaoHorarios = document.getElementById('secao-horarios');
+        if (tipo === 'atestado' || tipo === 'falta_justificada') {
+            secaoHorarios.style.display = 'none';
+        } else {
+            secaoHorarios.style.display = 'flex';
+        }
+    }
+
+    async function salvarAjustePonto() {
+        const btn = document.getElementById('btn-salvar-ajuste');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Salvando...';
+
+        const payload = {
+            funcionario_id: parseInt(document.getElementById('ajuste-func-id').value),
+            data: document.getElementById('ajuste-data-iso').value,
+            tipo_ajuste: document.getElementById('ajuste-tipo').value,
+            motivo: document.getElementById('ajuste-motivo').value,
+            entrada: document.getElementById('ajuste-entrada').value || null,
+            almoco_saida: document.getElementById('ajuste-almoco-s').value || null,
+            almoco_retorno: document.getElementById('ajuste-almoco-r').value || null,
+            saida: document.getElementById('ajuste-saida').value || null
+        };
+
+        try {
+            const r = await fetchAuth('/api/relatorios/ajuste', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const dados = await r.json();
+
+            if (r.ok && dados.sucesso) {
+                bootstrap.Modal.getInstance(document.getElementById('modal-ajuste')).hide();
+                gerarRelatorio();
+            } else {
+                const el = document.getElementById('alerta-ajuste');
+                el.className = 'alert alert-danger';
+                el.textContent = dados.detail || dados.mensagem || 'Erro ao salvar ajuste';
+                el.classList.remove('d-none');
+            }
+        } catch(err) {
+            const el = document.getElementById('alerta-ajuste');
+            el.className = 'alert alert-danger';
+            el.textContent = 'Erro de comunicação com o servidor';
+            el.classList.remove('d-none');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Salvar Correção';
+        }
+    }
+
+    async function exportarCSV() {
+        const mes = document.getElementById('filtro-mes').value;
+        const ano = document.getElementById('filtro-ano').value;
+        const funcId = document.getElementById('filtro-funcionario').value;
+
+        let url = `/api/relatorios/exportar?mes=${mes}&ano=${ano}`;
+        if (funcId) url += `&funcionario_id=${funcId}`;
+
+        const token = localStorage.getItem('ponto_token');
+        const response = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+
+        if (response.ok) {
+            const blob = await response.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `relatorio_ponto_${String(mes).padStart(2,'0')}_${ano}.csv`;
+            a.click();
+        }
+    }
+</script>
+{% endblock %}

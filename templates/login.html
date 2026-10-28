@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Login - Administração{% endblock %}
+
+{% block body %}
+<div class="login-page">
+    <div class="login-card">
+        <div class="login-logo">
+            <i class="fas fa-clock fa-3x"></i>
+            <h2>Sistema de Ponto</h2>
+            <p class="text-muted">Painel Administrativo</p>
+        </div>
+
+        <div id="alerta-erro" class="alert alert-danger d-none" role="alert">
+            <i class="fas fa-exclamation-circle"></i>
+            <span id="msg-erro">Usuário ou senha incorretos</span>
+        </div>
+
+        <form id="form-login" onsubmit="fazerLogin(event)">
+            <div class="mb-3">
+                <label class="form-label text-light">Usuário</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary text-light">
+                        <i class="fas fa-user"></i>
+                    </span>
+                    <input type="text" class="form-control bg-dark border-secondary text-light"
+                           id="username" placeholder="Digite seu usuário" required autocomplete="username">
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label text-light">Senha</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary text-light">
+                        <i class="fas fa-lock"></i>
+                    </span>
+                    <input type="password" class="form-control bg-dark border-secondary text-light"
+                           id="password" placeholder="Digite sua senha" required autocomplete="current-password">
+                    <button type="button" class="input-group-text bg-dark border-secondary text-light"
+                            onclick="toggleSenha()">
+                        <i class="fas fa-eye" id="icone-olho"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-danger w-100 btn-lg" id="btn-login">
+                <span id="btn-login-texto">
+                    <i class="fas fa-sign-in-alt"></i> Entrar
+                </span>
+                <span id="btn-login-loading" class="d-none">
+                    <span class="spinner-border spinner-border-sm"></span> Entrando...
+                </span>
+            </button>
+        </form>
+
+        <div class="mt-4 text-center">
+            <a href="/" class="text-secondary text-decoration-none">
+                <i class="fas fa-arrow-left"></i> Voltar ao Registro de Ponto
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Redireciona se já estiver logado
+    const token = localStorage.getItem('ponto_token');
+    if (token) {
+        fetch('/api/auth/verificar', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        }).then(r => {
+            if (r.ok) window.location.href = '/admin';
+        }).catch(() => {});
+    }
+
+    async function fazerLogin(e) {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        document.getElementById('btn-login-texto').classList.add('d-none');
+        document.getElementById('btn-login-loading').classList.remove('d-none');
+        document.getElementById('alerta-erro').classList.add('d-none');
+
+        try {
+            const resp = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const dados = await resp.json();
+
+            if (resp.ok) {
+                localStorage.setItem('ponto_token', dados.access_token);
+                localStorage.setItem('ponto_admin_nome', dados.nome);
+                window.location.href = '/admin';
+            } else {
+                document.getElementById('msg-erro').textContent = dados.detail || 'Usuário ou senha incorretos';
+                document.getElementById('alerta-erro').classList.remove('d-none');
+            }
+        } catch (err) {
+            document.getElementById('msg-erro').textContent = 'Erro de conexão com o servidor';
+            document.getElementById('alerta-erro').classList.remove('d-none');
+        } finally {
+            document.getElementById('btn-login-texto').classList.remove('d-none');
+            document.getElementById('btn-login-loading').classList.add('d-none');
+        }
+    }
+
+    function toggleSenha() {
+        const input = document.getElementById('password');
+        const icone = document.getElementById('icone-olho');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icone.className = 'fas fa-eye-slash';
+        } else {
+            input.type = 'password';
+            icone.className = 'fas fa-eye';
+        }
+    }
+</script>
+{% endblock %}
