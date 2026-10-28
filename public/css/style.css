@@ -107,19 +107,20 @@ body {
 .botoes-ponto { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .75rem; }
 .btn-ponto {
   display: flex; flex-direction: column; align-items: center;
-  gap: .35rem; padding: .9rem .5rem;
+  gap: .35rem; padding: 1rem .5rem;
   border: none; border-radius: 10px; cursor: pointer;
-  font-weight: 700; font-size: .85rem; transition: all .2s;
-  opacity: .4;
+  font-weight: 700; font-size: .9rem; transition: all .2s;
+  opacity: 1;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
-.btn-ponto.liberado { opacity: 1; transform: scale(1.02); }
-.btn-ponto:disabled { cursor: not-allowed; }
-.btn-ponto i { font-size: 1.4rem; }
+.btn-ponto:hover { transform: translateY(-2px); filter: brightness(1.15); }
+.btn-ponto:active { transform: translateY(1px); }
+.btn-ponto:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ponto i { font-size: 1.5rem; }
 .btn-entrada       { background: #28a745; color: #fff; }
 .btn-almoco-saida  { background: #e6a817; color: #000; }
 .btn-almoco-retorno{ background: #17a2b8; color: #fff; }
 .btn-saida         { background: #dc3545; color: #fff; }
-.btn-ponto.liberado:hover { filter: brightness(1.15); }
 
 /* ─── Resultado ──────────────────────────────────────── */
 .card-resultado {

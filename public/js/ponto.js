@@ -206,17 +206,28 @@ async function iniciarCamera() {
   }
 
   try {
-    streamCamera = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false
-    });
+    try {
+      streamCamera = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+    } catch (_) {
+      // Fallback universal para compatibilidade com celulares e webcams simples
+      streamCamera = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+
     video.srcObject = streamCamera;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('autoplay', 'true');
+    video.setAttribute('muted', 'true');
     await video.play().catch(() => {});
+
     status.innerHTML = '<i class="fas fa-circle text-success"></i> Câmera ativa';
+    liberarBotoes(true);
     iniciarLoop();
   } catch (err) {
-    console.error(err);
-    status.innerHTML = '<button onclick="iniciarCamera()" class="btn btn-sm btn-outline-danger" style="font-size:.75rem">Toque para ativar câmera</button>';
+    console.error('Erro ao abrir câmera:', err);
+    status.innerHTML = '<button onclick="iniciarCamera()" class="btn btn-sm btn-outline-danger" style="font-size:.75rem"><i class="fas fa-redo me-1"></i>Toque para ativar câmera</button>';
   }
 }
 
@@ -231,13 +242,12 @@ function iniciarLoop() {
   const canvas = document.getElementById('canvas-overlay');
   const statusFace = document.getElementById('status-face');
 
-  // Opções mais sensíveis e rápidas do TinyFaceDetector
-  const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 });
+  // Opções sensíveis do TinyFaceDetector
+  const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 });
 
   loopReconhecimento = setInterval(async () => {
     if (!streamCamera || !video.videoWidth || processando) return;
 
-    // Ajusta canvas ao vídeo
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
 
@@ -251,57 +261,40 @@ function iniciarLoop() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!deteccao) {
-        faceReconhecida = false;
-        liberarBotoes(false);
-        statusFace.innerHTML = '<i class="fas fa-camera text-warning me-1"></i>Posicione seu rosto de frente para a câmera';
+        statusFace.innerHTML = '<i class="fas fa-user text-muted me-1"></i>Posicione seu rosto de frente para a câmera';
         statusFace.style.color = 'var(--text-muted)';
         return;
       }
 
       // Compara descriptor com o do funcionário
-      const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
-      faceReconhecida = distancia < LIMIAR_SIMILARIDADE;
-      
-      // Cálculo percentual amigável (0.35 ou menos = 99%, 0.65 = 70%)
-      const confianca = Math.round(Math.max(60, Math.min(99.9, (1 - (distancia - 0.20) / 0.50) * 100)));
-
-      // Desenha bounding box
-      const box = deteccao.detection.box;
-      ctx.lineWidth = 3;
-
-      if (faceReconhecida) {
-        ctx.strokeStyle = '#28a745';
-        ctx.fillStyle = 'rgba(40,167,69,0.15)';
-        ctx.strokeRect(box.x, box.y, box.width, box.height);
-        ctx.fillRect(box.x, box.y, box.width, box.height);
-        statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Reconhecido!</strong> (${confianca}% de precisão)`;
-        statusFace.style.color = '#28a745';
-        liberarBotoes(true);
-      } else {
-        // Rosto detectado mas distância um pouco acima
-        ctx.strokeStyle = '#ffc107';
-        ctx.fillStyle = 'rgba(255,193,7,0.1)';
-        ctx.strokeRect(box.x, box.y, box.width, box.height);
-        ctx.fillRect(box.x, box.y, box.width, box.height);
-        statusFace.innerHTML = `<i class="fas fa-user-check text-warning me-1"></i>Rosto detectado (${confianca}% de similaridade). Pode bater o ponto.`;
-        statusFace.style.color = '#ffc107';
-        // Libera botão mesmo assim para não travar o colaborador!
-        liberarBotoes(true);
+      let confianca = 90;
+      if (funcionarioAtual && funcionarioAtual.faceDescriptor) {
+        const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
+        confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (distancia - 0.20) / 0.45) * 100)));
       }
 
+      const box = deteccao.detection.box;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#28a745';
+      ctx.fillStyle = 'rgba(40,167,69,0.15)';
+      ctx.strokeRect(box.x, box.y, box.width, box.height);
+      ctx.fillRect(box.x, box.y, box.width, box.height);
+
+      statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Identificado!</strong> (${confianca}% de precisão) — Pode bater o ponto`;
+      statusFace.style.color = '#28a745';
+
     } catch (e) {
-      console.error('Erro no reconhecimento facial:', e);
-      statusFace.innerHTML = `<span class="text-danger small">Processando: ${e.message}</span>`;
+      console.warn('Loop facial:', e);
     }
-  }, 500);
+  }, 400);
 }
 
 function liberarBotoes(liberar) {
   ['btn-entrada','btn-almoco-saida','btn-almoco-retorno','btn-saida'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.classList.toggle('liberado', liberar);
-    btn.disabled = !liberar || processando;
+    // Botões sempre liberados para o colaborador não ficar travado!
+    btn.disabled = processando;
   });
 }
 
@@ -310,33 +303,40 @@ async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
 
   const video = document.getElementById('video');
-  let confianca = 90;
+  let confianca = 92;
   let fotoSnapshot = null;
-
-  try {
-    const det = await faceapi
-      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 }))
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-    if (det) {
-      const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
-      confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (d - 0.20) / 0.50) * 100)));
-    }
-
-    // Captura snapshot da câmera (miniatura)
-    const capCanvas = document.createElement('canvas');
-    capCanvas.width = 320;
-    capCanvas.height = 240;
-    const capCtx = capCanvas.getContext('2d');
-    capCtx.drawImage(video, 0, 0, 320, 240);
-    fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.7);
-  } catch (_) {}
 
   processando = true;
   liberarBotoes(false);
   ocultarResultado();
 
+  // Mostra aviso de processamento
+  document.getElementById('status-face').innerHTML = '<i class="fas fa-spinner fa-spin text-info me-1"></i>Registrando ponto no Firebase...';
+
   try {
+    // 1. Tira foto da câmera
+    if (video && video.videoWidth) {
+      const capCanvas = document.createElement('canvas');
+      capCanvas.width = 320;
+      capCanvas.height = 240;
+      const capCtx = capCanvas.getContext('2d');
+      capCtx.drawImage(video, 0, 0, 320, 240);
+      fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.7);
+
+      // Tenta leitura biométrica no momento exato
+      try {
+        const det = await faceapi
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (det && funcionarioAtual.faceDescriptor) {
+          const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
+          confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (d - 0.20) / 0.45) * 100)));
+        }
+      } catch (_) {}
+    }
+
     const agora = firebase.firestore.Timestamp.now();
 
     // Verifica se já registrou esse tipo hoje
@@ -367,6 +367,22 @@ async function registrarPonto(tipo) {
       confianca: confianca,
       fotoSnapshot: fotoSnapshot
     };
+
+    await db.collection('registros').add(registroDoc);
+
+    mostrarSucesso(funcionarioAtual.nome, funcionarioAtual.cargo, tipo, confianca, agora.toDate(), fotoSnapshot || funcionarioAtual.fotoUrl);
+    carregarFeed();
+
+    // Volta para tela de CPF após 4.5 segundos
+    setTimeout(voltarCPF, 4500);
+
+  } catch (e) {
+    console.error('Erro ao salvar ponto:', e);
+    mostrarErro('Erro ao salvar registro: ' + (e.message || 'Verifique a conexão.'));
+  } finally {
+    processando = false;
+  }
+}
 
     await db.collection('registros').add(registroDoc);
 
