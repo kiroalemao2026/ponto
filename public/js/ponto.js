@@ -164,7 +164,7 @@ async function validarCPF() {
     alerta.classList.remove('d-none');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-arrow-right me-2"></i>Continuar para a Câmera';
+    btn.innerHTML = '<i class="fas fa-arrow-right me-2"></i>Continuar';
   }
 }
 

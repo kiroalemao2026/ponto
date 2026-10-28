@@ -80,7 +80,7 @@ async function prosseguirComCPF() {
         alerta.classList.remove('d-none');
     } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-arrow-right"></i> Continuar para a Câmera';
+        btn.innerHTML = '<i class="fas fa-arrow-right"></i> Continuar';
     }
 }
 
