@@ -26,10 +26,14 @@ TIPOS_VALIDOS = {
 class RegistroRequest(BaseModel):
     imagem_base64: str
     tipo: str
+    cpf: Optional[str] = None
+
+
+class ConsultaCPFRequest(BaseModel):
+    cpf: str
 
 
 def salvar_foto_registro(imagem_base64: str, funcionario_id: int, tipo: str) -> Optional[str]:
-    """Salva foto do registro de ponto."""
     try:
         os.makedirs(FOTOS_REGISTROS_DIR, exist_ok=True)
         if "," in imagem_base64:
@@ -51,22 +55,58 @@ def get_foto_base64(foto_path: str) -> Optional[str]:
     return None
 
 
+@router.post("/validar-cpf")
+def validar_cpf(dados: ConsultaCPFRequest, db: Session = Depends(get_db)):
+    cpf_limpo = "".join(filter(str.isdigit, dados.cpf))
+    if not cpf_limpo:
+        raise HTTPException(status_code=400, detail="Por favor, digite o CPF.")
+
+    func = db.query(Funcionario).filter(
+        Funcionario.cpf == cpf_limpo,
+        Funcionario.ativo == True
+    ).first()
+
+    if not func:
+        raise HTTPException(status_code=404, detail="Colaborador não encontrado com este CPF.")
+
+    if not func.encoding_facial:
+        raise HTTPException(status_code=400, detail="Colaborador sem foto/biometria cadastrada. Contate o administrador.")
+
+    return {
+        "sucesso": True,
+        "funcionario_id": func.id,
+        "nome": func.nome,
+        "cargo": func.cargo,
+        "departamento": func.departamento
+    }
+
+
 @router.post("/registrar")
 def registrar_ponto(dados: RegistroRequest, db: Session = Depends(get_db)):
     if dados.tipo not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail=f"Tipo inválido. Use: {', '.join(TIPOS_VALIDOS.keys())}")
 
-    # Busca todos funcionários ativos com encoding facial
-    funcionarios = db.query(Funcionario).filter(
-        Funcionario.ativo == True,
-        Funcionario.encoding_facial.isnot(None)
-    ).all()
+    # Se informou o CPF, faz a busca do funcionário específico (Segurança 1 para 1)
+    if dados.cpf:
+        cpf_limpo = "".join(filter(str.isdigit, dados.cpf))
+        funcionarios = db.query(Funcionario).filter(
+            Funcionario.cpf == cpf_limpo,
+            Funcionario.ativo == True,
+            Funcionario.encoding_facial.isnot(None)
+        ).all()
+    else:
+        # Busca todos ativos
+        funcionarios = db.query(Funcionario).filter(
+            Funcionario.ativo == True,
+            Funcionario.encoding_facial.isnot(None)
+        ).all()
 
     if not funcionarios:
-        raise HTTPException(
-            status_code=503,
-            detail="Nenhum funcionário cadastrado com reconhecimento facial. Contate o administrador."
-        )
+        return {
+            "sucesso": False,
+            "mensagem": "Nenhum funcionário cadastrado com biometria facial.",
+            "tipo": TIPOS_VALIDOS.get(dados.tipo, dados.tipo)
+        }
 
     lista_encodings = [
         {"id": f.id, "nome": f.nome, "encoding_facial": f.encoding_facial}
@@ -85,7 +125,6 @@ def registrar_ponto(dados: RegistroRequest, db: Session = Depends(get_db)):
     funcionario_id = resultado["funcionario_id"]
     func = db.query(Funcionario).filter(Funcionario.id == funcionario_id).first()
 
-    # Verifica se já registrou este tipo hoje
     hoje_inicio = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     registro_existente = db.query(RegistroPonto).filter(
         RegistroPonto.funcionario_id == funcionario_id,
@@ -101,10 +140,8 @@ def registrar_ponto(dados: RegistroRequest, db: Session = Depends(get_db)):
             "tipo": TIPOS_VALIDOS.get(dados.tipo, dados.tipo)
         }
 
-    # Salva foto do registro
     foto_caminho = salvar_foto_registro(dados.imagem_base64, funcionario_id, dados.tipo)
 
-    # Cria registro
     registro = RegistroPonto(
         funcionario_id=funcionario_id,
         tipo=dados.tipo,
@@ -153,24 +190,6 @@ def ultimos_registros(db: Session = Depends(get_db)):
             "foto_base64": get_foto_base64(func.foto_path) if func else None
         })
     return resultado
-
-
-@router.get("/funcionario/{funcionario_id}/hoje")
-def registros_hoje(funcionario_id: int, db: Session = Depends(get_db)):
-    hoje_inicio = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    registros = db.query(RegistroPonto).filter(
-        RegistroPonto.funcionario_id == funcionario_id,
-        RegistroPonto.timestamp >= hoje_inicio
-    ).order_by(RegistroPonto.timestamp).all()
-
-    return [
-        {
-            "tipo": r.tipo,
-            "tipo_label": TIPOS_VALIDOS.get(r.tipo, r.tipo),
-            "timestamp": r.timestamp.strftime("%H:%M:%S")
-        }
-        for r in registros
-    ]
 
 
 @router.get("/stats/hoje")

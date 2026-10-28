@@ -1,9 +1,10 @@
 // ============================================================
-//  camera.js - Lógica da tela de bater ponto
+//  camera.js - Lógica da tela de bater ponto com etapa de CPF
 // ============================================================
 
 let streamCamera = null;
 let processando = false;
+let cpfColaboradorAtual = null;
 
 const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -28,6 +29,74 @@ function iniciarRelogio() {
     setInterval(atualizar, 1000);
 }
 
+// ─── Máscara de CPF ──────────────────────────────────────────
+function mascara_cpf_ponto(input) {
+    let v = input.value.replace(/\D/g, '');
+    if (v.length > 11) v = v.slice(0, 11);
+    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+    v = v.replace(/(\d{3})(\d)/, '$1.$2');
+    v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    input.value = v;
+}
+
+// ─── Etapa 1: Validar CPF e Avançar ─────────────────────────
+async function prosseguirComCPF() {
+    const input = document.getElementById('input-cpf-ponto');
+    const cpf = input.value.trim();
+    const alerta = document.getElementById('alerta-cpf');
+    const btn = document.getElementById('btn-prosseguir-cpf');
+
+    if (!cpf || cpf.length < 14) {
+        alerta.textContent = 'Por favor, digite o CPF completo do colaborador.';
+        alerta.classList.remove('d-none');
+        return;
+    }
+
+    alerta.classList.add('d-none');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verificando CPF...';
+
+    try {
+        const resp = await fetch('/api/ponto/validar-cpf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cpf: cpf })
+        });
+
+        const dados = await resp.json();
+
+        if (resp.ok && dados.sucesso) {
+            cpfColaboradorAtual = cpf;
+            document.getElementById('nome-colaborador-sessao').textContent = dados.nome;
+            document.getElementById('etapa-cpf').classList.add('d-none');
+            document.getElementById('etapa-camera').classList.remove('d-none');
+            initCamera();
+        } else {
+            alerta.textContent = dados.detail || 'Colaborador não encontrado.';
+            alerta.classList.remove('d-none');
+        }
+    } catch (e) {
+        alerta.textContent = 'Erro ao conectar ao servidor.';
+        alerta.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-arrow-right"></i> Continuar para a Câmera';
+    }
+}
+
+function voltarParaCPF() {
+    if (streamCamera) {
+        streamCamera.getTracks().forEach(t => t.stop());
+        streamCamera = null;
+    }
+    cpfColaboradorAtual = null;
+    document.getElementById('etapa-camera').classList.add('d-none');
+    document.getElementById('etapa-cpf').classList.remove('d-none');
+    document.getElementById('input-cpf-ponto').value = '';
+    document.getElementById('input-cpf-ponto').focus();
+    ocultarResultado();
+}
+
 // ─── Câmera ───────────────────────────────────────────────────
 async function initCamera() {
     const video = document.getElementById('video-camera');
@@ -36,7 +105,7 @@ async function initCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         statusEl.innerHTML = '<i class="fas fa-lock text-warning"></i> HTTPS Necessário';
         statusEl.style.color = '#ffc107';
-        mostrarToast('Para o celular liberar a câmera, é necessário acessar via HTTPS ou permitir no navegador.');
+        mostrarToast('Para o navegador liberar a câmera, é necessário acessar via HTTPS.');
         return;
     }
 
@@ -59,7 +128,7 @@ async function initCamera() {
         console.error('Erro na câmera:', err);
         statusEl.innerHTML = '<button onclick="initCamera()" class="btn btn-sm btn-outline-danger p-0 px-2" style="font-size:0.75rem;"><i class="fas fa-redo"></i> Toque para ativar câmera</button>';
         statusEl.style.color = '#e94560';
-        mostrarToast('Câmera bloqueada ou sem permissão. Clique no ícone do cadeado no topo do navegador para permitir.');
+        mostrarToast('Câmera bloqueada ou sem permissão.');
     }
 }
 
@@ -77,7 +146,6 @@ function captureFrame() {
     return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-// ─── Efeito de flash ──────────────────────────────────────────
 function dispararFlash() {
     const flash = document.getElementById('flash-efeito');
     flash.classList.add('ativo');
@@ -106,7 +174,11 @@ async function registrarPonto(tipo) {
         const resposta = await fetch('/api/ponto/registrar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imagem_base64: imagemBase64, tipo: tipo })
+            body: JSON.stringify({ 
+                imagem_base64: imagemBase64, 
+                tipo: tipo,
+                cpf: cpfColaboradorAtual
+            })
         });
 
         const dados = await resposta.json();
@@ -114,6 +186,11 @@ async function registrarPonto(tipo) {
 
         if (dados.sucesso) {
             exibirResultadoSucesso(dados);
+            carregarFeed();
+            // Retorna para a tela de CPF após 4 segundos para o próximo colaborador
+            setTimeout(() => {
+                voltarParaCPF();
+            }, 4500);
         } else {
             exibirResultadoErro(dados.mensagem, dados.tipo);
         }
@@ -127,7 +204,6 @@ async function registrarPonto(tipo) {
     }
 }
 
-// ─── Exibição de resultado ────────────────────────────────────
 function ocultarResultado() {
     document.getElementById('card-resultado').classList.add('oculto');
 }
@@ -141,7 +217,6 @@ function exibirResultadoSucesso(dados) {
     const card = document.getElementById('card-resultado');
     card.className = 'card-resultado card-sucesso';
 
-    // Foto
     const img = document.getElementById('resultado-foto-img');
     if (dados.foto_base64) {
         img.src = dados.foto_base64;
@@ -155,7 +230,7 @@ function exibirResultadoSucesso(dados) {
     document.getElementById('resultado-tipo').innerHTML = `<span class="badge-tipo badge-${dados.tipo}">${dados.tipo_label}</span>`;
     document.getElementById('resultado-hora').innerHTML = `<i class="fas fa-clock"></i> ${dados.timestamp}`;
     document.getElementById('resultado-confianca').innerHTML = dados.confianca
-        ? `<i class="fas fa-fingerprint"></i> Confiança: ${dados.confianca}%`
+        ? `<i class="fas fa-fingerprint"></i> Biometria Neural: ${dados.confianca}%`
         : '';
 
     document.getElementById('resultado-icone').innerHTML = '<i class="fas fa-check-circle text-success fa-3x"></i>';
@@ -171,7 +246,7 @@ function exibirResultadoErro(mensagem, tipo) {
     card.className = 'card-resultado card-erro';
 
     document.getElementById('resultado-foto-img').style.display = 'none';
-    document.getElementById('resultado-nome').textContent = 'Não Identificado';
+    document.getElementById('resultado-nome').textContent = 'Biometria Não Reconhecida';
     document.getElementById('resultado-cargo').textContent = '';
     document.getElementById('resultado-tipo').textContent = tipo || '';
     document.getElementById('resultado-hora').textContent = '';
@@ -184,7 +259,6 @@ function exibirResultadoErro(mensagem, tipo) {
     setTimeout(() => card.classList.remove('card-animando'), 600);
 }
 
-// ─── Botões ───────────────────────────────────────────────────
 function desabilitarBotoes(desabilitar) {
     ['btn-entrada', 'btn-almoco-saida', 'btn-almoco-retorno', 'btn-saida'].forEach(id => {
         const btn = document.getElementById(id);
@@ -192,7 +266,6 @@ function desabilitarBotoes(desabilitar) {
     });
 }
 
-// ─── Feed de últimos registros ────────────────────────────────
 async function carregarFeed() {
     const feed = document.getElementById('feed-registros');
     try {
@@ -201,7 +274,7 @@ async function carregarFeed() {
         const registros = await r.json();
 
         if (!registros.length) {
-            feed.innerHTML = '<div class="text-center text-muted py-3">Nenhum registro</div>';
+            feed.innerHTML = '<div class="text-center text-muted py-3">Nenhum registro hoje</div>';
             return;
         }
 
@@ -229,12 +302,9 @@ async function carregarFeed() {
                 </div>
             </div>
         `).join('');
-    } catch (e) {
-        console.error('Feed:', e);
-    }
+    } catch (e) {}
 }
 
-// ─── Toast de erro ────────────────────────────────────────────
 function mostrarToast(msg) {
     document.getElementById('toast-msg').textContent = msg;
     const toastEl = document.getElementById('toast-camera');
