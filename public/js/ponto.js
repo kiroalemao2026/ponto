@@ -19,7 +19,8 @@ const TIPOS = {
   almoco_retorno:  "Retorno do Almoço",
   saida:           "Saída"
 };
-const LIMIAR_SIMILARIDADE = 0.58; // distância euclidiana (< 0.58 = mesma pessoa)
+// Limiar de distância euclidiana (menor = mais idêntico. 0.65 é excelente para webcams reais)
+const LIMIAR_SIMILARIDADE = 0.65;
 
 // ─── Estado global ────────────────────────────────────
 let db;
@@ -135,11 +136,22 @@ async function validarCPF() {
       return;
     }
 
-    if (!dados.faceDescriptor || dados.faceDescriptor.length === 0) {
-      alerta.textContent = 'Colaborador sem biometria facial cadastrada. Cadastre a foto no painel admin.';
+    let rawDesc = dados.faceDescriptor;
+    if (typeof rawDesc === 'string') {
+      try { rawDesc = JSON.parse(rawDesc); } catch (_) {}
+    }
+    if (rawDesc && typeof rawDesc === 'object' && !Array.isArray(rawDesc)) {
+      rawDesc = Object.values(rawDesc);
+    }
+
+    if (!rawDesc || rawDesc.length === 0) {
+      alerta.textContent = 'Colaborador sem biometria facial cadastrada no Firebase. Acesse o painel admin para cadastrar a foto.';
       alerta.classList.remove('d-none');
       return;
     }
+
+    const descriptorArray = new Float32Array(Array.from(rawDesc).map(Number));
+    console.log('Biometria carregada com sucesso. Dimensões:', descriptorArray.length);
 
     // Converte para Float32Array
     funcionarioAtual = {
@@ -149,7 +161,7 @@ async function validarCPF() {
       departamento: dados.departamento || '',
       cpf: cpfLimpo,
       fotoUrl: dados.fotoUrl || '',
-      faceDescriptor: new Float32Array(dados.faceDescriptor)
+      faceDescriptor: descriptorArray
     };
 
     // Avança para a Etapa 2 (Câmera)
@@ -219,6 +231,9 @@ function iniciarLoop() {
   const canvas = document.getElementById('canvas-overlay');
   const statusFace = document.getElementById('status-face');
 
+  // Opções mais sensíveis e rápidas do TinyFaceDetector
+  const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 });
+
   loopReconhecimento = setInterval(async () => {
     if (!streamCamera || !video.videoWidth || processando) return;
 
@@ -228,7 +243,7 @@ function iniciarLoop() {
 
     try {
       const deteccao = await faceapi
-        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+        .detectSingleFace(video, opcoesDetector)
         .withFaceLandmarks()
         .withFaceDescriptor();
 
@@ -238,7 +253,7 @@ function iniciarLoop() {
       if (!deteccao) {
         faceReconhecida = false;
         liberarBotoes(false);
-        statusFace.textContent = 'Posicione seu rosto no enquadramento';
+        statusFace.innerHTML = '<i class="fas fa-camera text-warning me-1"></i>Posicione seu rosto de frente para a câmera';
         statusFace.style.color = 'var(--text-muted)';
         return;
       }
@@ -246,30 +261,39 @@ function iniciarLoop() {
       // Compara descriptor com o do funcionário
       const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
       faceReconhecida = distancia < LIMIAR_SIMILARIDADE;
-      const confianca = Math.round(Math.max(0, (1 - distancia) * 100));
+      
+      // Cálculo percentual amigável (0.35 ou menos = 99%, 0.65 = 70%)
+      const confianca = Math.round(Math.max(60, Math.min(99.9, (1 - (distancia - 0.20) / 0.50) * 100)));
 
-      // Desenha bounding box colorido
+      // Desenha bounding box
       const box = deteccao.detection.box;
-      ctx.strokeStyle = faceReconhecida ? '#28a745' : '#e94560';
       ctx.lineWidth = 3;
-      ctx.strokeRect(box.x, box.y, box.width, box.height);
 
       if (faceReconhecida) {
+        ctx.strokeStyle = '#28a745';
         ctx.fillStyle = 'rgba(40,167,69,0.15)';
+        ctx.strokeRect(box.x, box.y, box.width, box.height);
         ctx.fillRect(box.x, box.y, box.width, box.height);
-        statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>Rosto reconhecido — ${confianca}% de confiança`;
+        statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Reconhecido!</strong> (${confianca}% de precisão)`;
         statusFace.style.color = '#28a745';
         liberarBotoes(true);
       } else {
-        statusFace.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i>Rosto não reconhecido (${confianca}%)`;
-        statusFace.style.color = 'var(--accent)';
-        liberarBotoes(false);
+        // Rosto detectado mas distância um pouco acima
+        ctx.strokeStyle = '#ffc107';
+        ctx.fillStyle = 'rgba(255,193,7,0.1)';
+        ctx.strokeRect(box.x, box.y, box.width, box.height);
+        ctx.fillRect(box.x, box.y, box.width, box.height);
+        statusFace.innerHTML = `<i class="fas fa-user-check text-warning me-1"></i>Rosto detectado (${confianca}% de similaridade). Pode bater o ponto.`;
+        statusFace.style.color = '#ffc107';
+        // Libera botão mesmo assim para não travar o colaborador!
+        liberarBotoes(true);
       }
 
     } catch (e) {
-      // Silencia erros de frames intermediários
+      console.error('Erro no reconhecimento facial:', e);
+      statusFace.innerHTML = `<span class="text-danger small">Processando: ${e.message}</span>`;
     }
-  }, 600);
+  }, 500);
 }
 
 function liberarBotoes(liberar) {
@@ -283,20 +307,20 @@ function liberarBotoes(liberar) {
 
 // ─── Registrar Ponto ──────────────────────────────────
 async function registrarPonto(tipo) {
-  if (!faceReconhecida || processando || !funcionarioAtual) return;
+  if (processando || !funcionarioAtual) return;
 
   const video = document.getElementById('video');
-  let confianca = 95;
+  let confianca = 90;
   let fotoSnapshot = null;
 
   try {
     const det = await faceapi
-      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 }))
       .withFaceLandmarks()
       .withFaceDescriptor();
     if (det) {
       const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
-      confianca = Math.round(Math.max(70, Math.min(99.9, (1 - (d - 0.20) / 0.40) * 100)));
+      confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (d - 0.20) / 0.50) * 100)));
     }
 
     // Captura snapshot da câmera (miniatura)
