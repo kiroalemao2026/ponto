@@ -294,18 +294,77 @@ function liberarBotoes(liberar) {
   });
 }
 
+// ─── Controle do Overlay Modal (Centralizado) ────────
+function abrirOverlayProcessando() {
+  document.getElementById('overlay-ponto').classList.remove('d-none');
+  document.getElementById('overlay-processando').classList.remove('d-none');
+  document.getElementById('overlay-sucesso').classList.add('d-none');
+  document.getElementById('overlay-erro').classList.add('d-none');
+}
+
+function abrirOverlaySucesso(nome, tipoLabel, hora, foto) {
+  document.getElementById('overlay-ponto').classList.remove('d-none');
+  document.getElementById('overlay-processando').classList.add('d-none');
+  document.getElementById('overlay-erro').classList.add('d-none');
+  document.getElementById('overlay-sucesso').classList.remove('d-none');
+
+  document.getElementById('overlay-nome').textContent = nome;
+  document.getElementById('overlay-tipo').textContent = tipoLabel;
+  document.getElementById('overlay-hora').textContent = hora;
+
+  if (foto) {
+    document.getElementById('overlay-icone-sucesso').innerHTML = 
+      `<img src="${foto}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid var(--success);box-shadow:0 0 20px rgba(40,167,69,0.5);">`;
+  } else {
+    document.getElementById('overlay-icone-sucesso').innerHTML = 
+      '<i class="fas fa-check-circle text-success" style="font-size: 4.5rem;"></i>';
+  }
+
+  // Contador regressivo de 5 segundos
+  let segundos = 5;
+  const contadorNum = document.getElementById('overlay-contador-numero');
+  contadorNum.textContent = segundos;
+
+  if (timerContagem) clearInterval(timerContagem);
+  timerContagem = setInterval(() => {
+    segundos--;
+    contadorNum.textContent = segundos;
+    if (segundos <= 0) {
+      clearInterval(timerContagem);
+      timerContagem = null;
+      fecharOverlay();
+      voltarCPF();
+    }
+  }, 1000);
+}
+
+function abrirOverlayErro(msg) {
+  document.getElementById('overlay-ponto').classList.remove('d-none');
+  document.getElementById('overlay-processando').classList.add('d-none');
+  document.getElementById('overlay-sucesso').classList.add('d-none');
+  document.getElementById('overlay-erro').classList.remove('d-none');
+  document.getElementById('overlay-erro-msg').textContent = msg;
+}
+
+function fecharOverlayErro() {
+  fecharOverlay();
+  liberarBotoes(true);
+}
+
+function fecharOverlay() {
+  const overlay = document.getElementById('overlay-ponto');
+  if (overlay) overlay.classList.add('d-none');
+}
+
 // ─── Registrar Ponto ──────────────────────────────────
 async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
 
   processando = true;
   liberarBotoes(false);
-  ocultarResultado();
 
-  // Exibe a ação visual "Registrando ponto..."
-  const procCard = document.getElementById('card-processando');
-  if (procCard) procCard.classList.remove('d-none');
-  document.getElementById('status-face').innerHTML = '<i class="fas fa-spinner fa-spin text-info me-1"></i><strong>Registrando ponto...</strong> Salvando no Firebase';
+  // Abre na tela o modal destacado "Registrando ponto..."
+  abrirOverlayProcessando();
 
   const video = document.getElementById('video');
   let confianca = 92;
@@ -352,9 +411,8 @@ async function registrarPonto(tipo) {
     });
 
     if (jaRegistrou) {
-      if (procCard) procCard.classList.add('d-none');
       const horaExist = jaRegistrou.data().timestamp?.toDate ? jaRegistrou.data().timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
-      mostrarErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
+      abrirOverlayErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
       return;
     }
 
@@ -375,14 +433,13 @@ async function registrarPonto(tipo) {
     await db.collection('registros').add(registroDoc);
     console.log('✅ Ponto salvo com sucesso no Firestore!');
 
-    if (procCard) procCard.classList.add('d-none');
-    mostrarSucesso(funcionarioAtual.nome, funcionarioAtual.cargo, tipo, confianca, agora.toDate(), fotoSnapshot || funcionarioAtual.fotoUrl);
+    const horaFormatada = agora.toDate().toLocaleTimeString('pt-BR');
+    abrirOverlaySucesso(funcionarioAtual.nome, TIPOS[tipo], horaFormatada, fotoSnapshot || funcionarioAtual.fotoUrl);
     carregarFeed();
 
   } catch (e) {
-    if (procCard) procCard.classList.add('d-none');
     console.error('Erro ao salvar ponto:', e);
-    mostrarErro('Erro ao salvar registro: ' + (e.message || 'Verifique a conexão.'));
+    abrirOverlayErro('Erro ao salvar no Firebase: ' + (e.message || 'Verifique sua conexão.'));
   } finally {
     processando = false;
   }
@@ -390,12 +447,9 @@ async function registrarPonto(tipo) {
 
 // ─── UI Resultado ─────────────────────────────────────
 function ocultarResultado() {
+  fecharOverlay();
   const card = document.getElementById('card-resultado');
-  card.classList.remove('visivel','sucesso','erro');
-  const contadorBox = document.getElementById('res-contador');
-  if (contadorBox) contadorBox.classList.add('d-none');
-  const proc = document.getElementById('card-processando');
-  if (proc) proc.classList.add('d-none');
+  if (card) card.classList.remove('visivel','sucesso','erro');
 }
 
 function mostrarSucesso(nome, cargo, tipo, confianca, data, foto) {

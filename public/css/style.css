@@ -43,6 +43,36 @@ body {
 #tela-carregando p { color: var(--text-muted); font-size: 1rem; }
 .hidden { display: none !important; }
 
+/* ─── Overlay Modal de Registro de Ponto ─────────────── */
+.overlay-ponto {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 1.25rem;
+}
+.overlay-conteudo {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+  animation: modalEntrada 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes modalEntrada {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.contador-caixa {
+  background: rgba(0, 0, 0, 0.5) !important;
+  border-radius: 12px;
+}
+
 /* ─── Header ─────────────────────────────────────────── */
 .ponto-header {
   background: var(--bg-secondary);

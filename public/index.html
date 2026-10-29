@@ -29,6 +29,52 @@
   </div>
 </header>
 
+<!-- ── OVERLAY MODAL: REGISTRANDO E CONTAGEM REGRESSIVA ── -->
+<div id="overlay-ponto" class="overlay-ponto d-none">
+  <div class="overlay-conteudo p-4 text-center">
+
+    <!-- Estado 1: Processando -->
+    <div id="overlay-processando">
+      <div class="spinner-border text-accent mb-3" style="width: 3.8rem; height: 3.8rem; border-width: 4px;" role="status"></div>
+      <h3 class="text-light fw-bold mb-2">Registrando ponto...</h3>
+      <p class="text-muted mb-0" style="font-size: 0.95rem;">Capturando foto e salvando no Firebase</p>
+    </div>
+
+    <!-- Estado 2: Sucesso -->
+    <div id="overlay-sucesso" class="d-none">
+      <div id="overlay-icone-sucesso" class="mb-3">
+        <i class="fas fa-check-circle text-success" style="font-size: 4rem;"></i>
+      </div>
+      <h3 class="text-success fw-bold mb-1">Ponto Registrado com Sucesso!</h3>
+      <h4 class="text-light fw-bold mb-1" id="overlay-nome">Bruno Antônio</h4>
+      <div class="mb-3">
+        <span class="badge bg-success fs-6 px-3 py-1" id="overlay-tipo">Entrada</span>
+        <span class="text-muted ms-2" id="overlay-hora">00:00:00</span>
+      </div>
+
+      <!-- Contador Regressivo Visível de 5 Segundos -->
+      <div class="contador-caixa p-3 border border-success">
+        <div class="small text-muted mb-1">
+          <i class="fas fa-hourglass-half text-success me-1"></i> Retornando para o próximo colaborador em:
+        </div>
+        <div class="display-3 fw-bold text-success" id="overlay-contador-numero">5</div>
+        <div class="small text-muted">segundos</div>
+      </div>
+    </div>
+
+    <!-- Estado 3: Erro -->
+    <div id="overlay-erro" class="d-none">
+      <i class="fas fa-exclamation-triangle text-danger mb-3" style="font-size: 4rem;"></i>
+      <h4 class="text-danger fw-bold mb-2">Atenção</h4>
+      <p class="text-light mb-4" id="overlay-erro-msg">Mensagem</p>
+      <button class="btn btn-secondary w-100 py-2 fw-bold" onclick="fecharOverlayErro()">
+        <i class="fas fa-arrow-left me-1"></i> Voltar
+      </button>
+    </div>
+
+  </div>
+</div>
+
 <!-- ── Main ── -->
 <main class="ponto-main">
 
