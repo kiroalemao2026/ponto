@@ -580,13 +580,22 @@ async function salvarFuncionario(e) {
 }
 
 async function excluirFuncionario(id, nome) {
-  if (!confirm(`Deseja realmente desativar o colaborador "${nome}"?`)) return;
+  if (!confirm(`Deseja realmente EXCLUIR o colaborador "${nome}" do sistema?\n\nEsta ação removerá o cadastro e a biometria facial definitivamente.`)) {
+    return;
+  }
 
   try {
-    await db.collection('funcionarios').doc(id).update({ ativo: false });
-    carregarFuncionarios();
+    await db.collection('funcionarios').doc(id).delete();
+    // Remove do cache imediatamente
+    listaFuncionariosCache = listaFuncionariosCache.filter(f => f.id !== id);
+    
+    // Recarrega as tabelas e métricas
+    await carregarFuncionarios();
+    await carregarDadosGerais();
+    alert(`Colaborador "${nome}" excluído com sucesso!`);
   } catch (err) {
-    alert('Erro ao desativar: ' + err.message);
+    console.error('Erro ao excluir funcionário:', err);
+    alert('Erro ao excluir colaborador: ' + err.message);
   }
 }
 
