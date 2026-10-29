@@ -564,5 +564,18 @@ async function carregarFeed() {
   }
 }
 
+// Previne zoom indesejado de duplo clique no Safari / Chrome Mobile
+let ultimoToque = 0;
+document.addEventListener('touchend', function(e) {
+  const agora = Date.now();
+  if (agora - ultimoToque <= 300) {
+    if (e.target.closest('.btn-tecla, .btn-ponto, .btn')) {
+      e.preventDefault();
+      e.target.click();
+    }
+  }
+  ultimoToque = agora;
+}, { passive: false });
+
 // ─── Arranque ─────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
