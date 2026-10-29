@@ -376,22 +376,6 @@ async function registrarPonto(tipo) {
   }
 }
 
-    await db.collection('registros').add(registroDoc);
-
-    mostrarSucesso(funcionarioAtual.nome, funcionarioAtual.cargo, tipo, confianca, agora.toDate(), fotoSnapshot || funcionarioAtual.fotoUrl);
-    carregarFeed();
-
-    // Volta para CPF após 4.5 segundos
-    setTimeout(voltarCPF, 4500);
-
-  } catch (e) {
-    console.error('Erro ao salvar ponto:', e);
-    mostrarErro('Erro ao salvar registro no Firebase: ' + (e.message || 'Verifique a conexão.'));
-  } finally {
-    processando = false;
-  }
-}
-
 // ─── UI Resultado ─────────────────────────────────────
 function ocultarResultado() {
   const card = document.getElementById('card-resultado');
