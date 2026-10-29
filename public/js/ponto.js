@@ -55,6 +55,30 @@ function mascaraCPF(input) {
   input.value = v;
 }
 
+// ─── Funções do Teclado Numérico Virtual em Tela ─────
+function teclarDigito(d) {
+  const input = document.getElementById('input-cpf');
+  let v = input.value.replace(/\D/g, '');
+  if (v.length >= 11) return;
+  input.value = v + d;
+  mascaraCPF(input);
+}
+
+function teclarApagar() {
+  const input = document.getElementById('input-cpf');
+  let v = input.value.replace(/\D/g, '');
+  if (v.length > 0) {
+    input.value = v.slice(0, -1);
+    mascaraCPF(input);
+  }
+}
+
+function teclarLimpar() {
+  const input = document.getElementById('input-cpf');
+  input.value = '';
+  document.getElementById('alerta-cpf').classList.add('d-none');
+}
+
 function toast(msg, tipo = 'danger') {
   const el = document.getElementById('toast');
   el.className = `toast text-bg-${tipo}`;

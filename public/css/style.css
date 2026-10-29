@@ -104,9 +104,50 @@ body {
   background: var(--bg-secondary) !important;
   color: var(--text-light) !important;
   border-color: var(--border) !important;
-  font-size: 1.3rem; text-align: center; letter-spacing: 2px;
+  font-size: 1.6rem; text-align: center; letter-spacing: 2px;
+  font-weight: 700;
 }
 #etapa-cpf input:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(233,69,96,.25) !important; }
+
+/* ─── Teclado Numérico Virtual (Totem / Kiosk) ───────── */
+.teclado-numerico {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  max-width: 320px;
+  margin: 0 auto;
+}
+.btn-tecla {
+  background: var(--bg-secondary);
+  color: var(--text-light);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+.btn-tecla:hover {
+  background: #252d3a;
+  border-color: var(--accent);
+  color: #fff;
+  transform: translateY(-2px);
+}
+.btn-tecla:active {
+  transform: translateY(1px);
+  background: var(--accent);
+  color: #fff;
+}
+.btn-tecla-acao {
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* ─── Etapa câmera ───────────────────────────────────── */
 #etapa-camera {
