@@ -112,7 +112,8 @@ async function carregarDadosGerais() {
     listaFuncionariosCache = snapFunc.docs.map(d => ({ id: d.id, ...d.data() }));
 
     const totalAtivos = listaFuncionariosCache.filter(f => f.ativo !== false).length;
-    document.getElementById('dash-total-func').textContent = totalAtivos;
+    const elTotalFunc = document.getElementById('dash-total-func');
+    if (elTotalFunc) elTotalFunc.textContent = totalAtivos;
 
     // 2. Todos os Registros do Firestore (sem exigência de índice)
     const snapReg = await db.collection('registros').get();
@@ -134,12 +135,15 @@ async function carregarDadosGerais() {
       return dt >= inicioHojeMs;
     });
 
-    document.getElementById('dash-batidas-hoje').textContent = registrosHoje.length;
+    const elBatidasHoje = document.getElementById('dash-batidas-hoje');
+    if (elBatidasHoje) elBatidasHoje.textContent = registrosHoje.length;
 
     // Presentes (que bateram entrada hoje)
     const cpfsPresentes = new Set(registrosHoje.filter(r => r.tipo === 'entrada').map(r => r.cpf));
-    document.getElementById('dash-presentes').textContent = cpfsPresentes.size;
-    document.getElementById('dash-ausentes').textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
+    const elPresentes = document.getElementById('dash-presentes');
+    if (elPresentes) elPresentes.textContent = cpfsPresentes.size;
+    const elAusentes = document.getElementById('dash-ausentes');
+    if (elAusentes) elAusentes.textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
 
     // 3. Colaboradores com Registro Hoje (Agrupado com clique para expandir pontos)
     const containerDash = document.getElementById('lista-colaboradores-dash');
