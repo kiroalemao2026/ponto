@@ -141,35 +141,157 @@ async function carregarDadosGerais() {
     document.getElementById('dash-presentes').textContent = cpfsPresentes.size;
     document.getElementById('dash-ausentes').textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
 
-    // 3. Tabela de últimos registros
-    const tbody = document.getElementById('tabela-dash-ultimos');
-    if (todosRegistros.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro encontrado ainda.</td></tr>';
+    // 3. Colaboradores com Registro Hoje (Agrupado com clique para expandir pontos)
+    const containerDash = document.getElementById('lista-colaboradores-dash');
+    const badgeTotalColabs = document.getElementById('dash-badge-total-colabs');
+
+    const registrosParaExibir = registrosHoje.length > 0 ? registrosHoje : todosRegistros;
+
+    if (registrosParaExibir.length === 0) {
+      if (containerDash) {
+        containerDash.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-inbox fs-2 mb-2 d-block"></i>Nenhum ponto registrado hoje ainda.</div>';
+      }
+      if (badgeTotalColabs) badgeTotalColabs.textContent = '0 colaboradores';
       return;
     }
 
-    const ultimos10 = todosRegistros.slice(0, 10);
-    tbody.innerHTML = ultimos10.map(r => {
-      const dataHora = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('pt-BR') : '--';
-      const foto = r.fotoSnapshot || '';
-      return `
-        <tr>
-          <td><i class="fas fa-clock text-muted me-1"></i> ${dataHora}</td>
-          <td><strong class="text-light">${r.funcionarioNome || 'Desconhecido'}</strong></td>
-          <td>${r.cargo || ''} <small class="text-muted">${r.departamento ? '· ' + r.departamento : ''}</small></td>
-          <td><span class="badge-tipo badge-${r.tipo}">${TIPOS_LABEL[r.tipo] || r.tipo}</span></td>
-          <td><i class="fas fa-fingerprint text-accent me-1"></i> ${r.confianca || 95}%</td>
-          <td>
-            ${foto 
-              ? `<img src="${foto}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="verFotoAmpliada('${foto}', '${r.funcionarioNome} - ${dataHora}')">` 
-              : '<span class="text-muted small">Sem foto</span>'}
-          </td>
-        </tr>
-      `;
-    }).join('');
+    // Agrupa os registros por funcionário (CPF)
+    const mapaColabs = new Map();
+    registrosParaExibir.forEach(r => {
+      const cleanCpf = (r.cpf || '').replace(/\D/g, '');
+      if (!cleanCpf) return;
+      if (!mapaColabs.has(cleanCpf)) {
+        const fInfo = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
+        mapaColabs.set(cleanCpf, {
+          cpf: cleanCpf,
+          nome: r.funcionarioNome || fInfo?.nome || 'Colaborador',
+          cargo: fInfo?.cargo || r.cargo || '',
+          departamento: fInfo?.departamento || r.departamento || '',
+          fotoPerfil: fInfo?.fotoBase64 || r.fotoSnapshot || '',
+          registros: []
+        });
+      }
+      mapaColabs.get(cleanCpf).registros.push(r);
+    });
+
+    const listaAgrupada = Array.from(mapaColabs.values());
+    if (badgeTotalColabs) {
+      badgeTotalColabs.textContent = `${listaAgrupada.length} colaborador${listaAgrupada.length === 1 ? '' : 'es'}`;
+    }
+
+    if (containerDash) {
+      containerDash.innerHTML = listaAgrupada.map(colab => {
+        // Ordena registros do mais recente para o mais antigo
+        const regs = colab.registros.sort((a, b) => {
+          const ta = extrairData(a.timestamp)?.getTime() || 0;
+          const tb = extrairData(b.timestamp)?.getTime() || 0;
+          return tb - ta;
+        });
+
+        const ultimo = regs[0];
+        const dtUltimo = extrairData(ultimo.timestamp);
+        const horaUltimo = dtUltimo ? dtUltimo.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '--:--';
+        const fotoPerfil = colab.fotoPerfil || ultimo.fotoSnapshot || '';
+
+        const fotoTag = fotoPerfil 
+          ? `<img src="${fotoPerfil}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);cursor:pointer;" onclick="verFotoAmpliada('${fotoPerfil}', '${colab.nome}')">`
+          : `<div style="width:48px;height:48px;border-radius:50%;background:#2a2f3a;display:flex;align-items:center;justify-content:center;color:#e94560;font-weight:bold;font-size:1.2rem;">${colab.nome.charAt(0)}</div>`;
+
+        const linhasPontos = regs.map(reg => {
+          const dt = extrairData(reg.timestamp);
+          const dataHoraStr = dt ? dt.toLocaleString('pt-BR') : '--';
+          const horaStr = dt ? dt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
+          const fotoReg = reg.fotoSnapshot || '';
+
+          return `
+            <tr>
+              <td class="text-light fw-bold"><i class="fas fa-clock text-accent me-1"></i> ${horaStr} <small class="text-muted">(${dt ? dt.toLocaleDateString('pt-BR') : ''})</small></td>
+              <td><span class="badge-tipo badge-${reg.tipo}">${TIPOS_LABEL[reg.tipo] || reg.tipo}</span></td>
+              <td><span class="text-light"><i class="fas fa-fingerprint text-accent me-1"></i> ${reg.confianca || 92}%</span></td>
+              <td>
+                ${fotoReg 
+                  ? `<img src="${fotoReg}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;cursor:pointer;border:1px solid #555;" onclick="verFotoAmpliada('${fotoReg}', '${colab.nome} - ${dataHoraStr}')">`
+                  : '<span class="text-muted small">Sem foto</span>'}
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        return `
+          <div class="border border-secondary rounded-3 bg-dark p-3" style="cursor: pointer;" onclick="togglePontosDash('${colab.cpf}', event)">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div class="d-flex align-items-center gap-3">
+                ${fotoTag}
+                <div>
+                  <h6 class="fw-bold text-light mb-0 fs-5">${colab.nome}</h6>
+                  <div class="text-muted small">${colab.cargo || 'Funcionário'} ${colab.departamento ? '· ' + colab.departamento : ''} · CPF: ${formatarCPF(colab.cpf)}</div>
+                </div>
+              </div>
+
+              <div class="d-flex align-items-center gap-3">
+                <div class="text-end">
+                  <span class="badge bg-danger fs-6">${regs.length} batida${regs.length === 1 ? '' : 's'}</span>
+                  <div class="small text-muted mt-1">Último: <span class="badge-tipo badge-${ultimo.tipo}">${TIPOS_LABEL[ultimo.tipo] || ultimo.tipo} às ${horaUltimo}</span></div>
+                </div>
+                <div class="p-2 rounded-circle bg-secondary bg-opacity-25 text-accent d-flex align-items-center justify-content-center" style="width:36px;height:36px;">
+                  <i class="fas fa-chevron-down fs-6" id="icone-dash-${colab.cpf}"></i>
+                </div>
+              </div>
+            </div>
+
+            <!-- GAVETA EXPANSÍVEL COM TODOS OS PONTOS (ABRE AO CLICAR NO COLABORADOR) -->
+            <div id="gaveta-dash-${colab.cpf}" class="d-none mt-3 pt-3 border-top border-secondary">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="text-muted small fw-bold text-uppercase"><i class="fas fa-history text-accent me-1"></i> Histórico de Batidas de ${colab.nome}:</span>
+                <span class="small text-muted">Clique na foto para ampliar</span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-dark table-sm table-hover mb-0 align-middle">
+                  <thead>
+                    <tr class="text-muted small">
+                      <th>Horário</th>
+                      <th>Tipo do Ponto</th>
+                      <th>Biometria Facial</th>
+                      <th>Foto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${linhasPontos}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
 
   } catch (err) {
     console.error('Erro ao carregar dados gerais:', err);
+  }
+}
+
+function togglePontosDash(cpf, event) {
+  // Evita conflito se clicar diretamente na foto para abrir o modal de zoom
+  if (event && event.target && event.target.tagName === 'IMG') return;
+
+  const gaveta = document.getElementById(`gaveta-dash-${cpf}`);
+  const icone = document.getElementById(`icone-dash-${cpf}`);
+  if (gaveta) {
+    const estaFechado = gaveta.classList.contains('d-none');
+    if (estaFechado) {
+      gaveta.classList.remove('d-none');
+      if (icone) {
+        icone.classList.remove('fa-chevron-down');
+        icone.classList.add('fa-chevron-up');
+      }
+    } else {
+      gaveta.classList.add('d-none');
+      if (icone) {
+        icone.classList.remove('fa-chevron-up');
+        icone.classList.add('fa-chevron-down');
+      }
+    }
   }
 }
 
