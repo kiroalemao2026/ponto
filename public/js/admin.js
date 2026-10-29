@@ -816,27 +816,6 @@ async function gerarEspelho() {
       }
     }
 
-    // Atualiza resumo no rodapé da folha (tanto na tela quanto na impressão A4)
-    const elResumoTrab = document.getElementById('resumo-folha-trabalhadas');
-    if (elResumoTrab) elResumoTrab.textContent = formatarHM(totalMinutosTrabalhados);
-
-    const elResumoPrev = document.getElementById('resumo-folha-previstas');
-    if (elResumoPrev) elResumoPrev.textContent = formatarHM(totalMinutosPrevistos);
-
-    const elResumoExtras = document.getElementById('resumo-folha-extras');
-    if (elResumoExtras) elResumoExtras.textContent = `+${formatarHM(totalMinutosExtras)}`;
-
-    const elResumoSaldo = document.getElementById('resumo-folha-saldo');
-    if (elResumoSaldo) {
-      if (saldoTotalMinutos >= 0) {
-        elResumoSaldo.className = 'fs-6 text-success fw-bold';
-        elResumoSaldo.textContent = `+${formatarHM(saldoTotalMinutos)}`;
-      } else {
-        elResumoSaldo.className = 'fs-6 text-danger fw-bold';
-        elResumoSaldo.textContent = `-${formatarHM(Math.abs(saldoTotalMinutos))}`;
-      }
-    }
-
   } catch (err) {
     console.error('Erro ao gerar espelho:', err);
     tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger">Erro ao calcular: ${err.message}</td></tr>`;

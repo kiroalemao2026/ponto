@@ -539,21 +539,6 @@ html, body {
     font-weight: 700 !important;
   }
 
-  /* Resumo de Fechamento */
-  .resumo-fechamento-folha {
-    background: #f8f9fa !important;
-    color: #000000 !important;
-    border: 1px solid #333333 !important;
-    border-radius: 4px !important;
-    padding: 4px 8px !important;
-    margin-bottom: 6px !important;
-    font-size: 7.8pt !important;
-    page-break-inside: avoid !important;
-  }
-  .resumo-fechamento-folha * {
-    color: #000000 !important;
-  }
-
   /* Bloco de Assinaturas */
   .bloco-assinaturas {
     margin-top: 8px !important;
