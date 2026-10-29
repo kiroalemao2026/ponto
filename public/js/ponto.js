@@ -26,6 +26,7 @@ const LIMIAR_SIMILARIDADE = 0.65;
 let db;
 let streamCamera = null;
 let loopReconhecimento = null;
+let timerContagem = null;
 let funcionarioAtual = null;   // { id, nome, cargo, departamento, cpf, faceDescriptor }
 let faceReconhecida = false;
 let processando = false;
@@ -181,6 +182,10 @@ async function validarCPF() {
 }
 
 function voltarCPF() {
+  if (timerContagem) {
+    clearInterval(timerContagem);
+    timerContagem = null;
+  }
   pararCamera();
   funcionarioAtual = null;
   faceReconhecida = false;
@@ -190,9 +195,11 @@ function voltarCPF() {
   document.getElementById('etapa-cpf').classList.remove('hidden');
   document.getElementById('input-cpf').value = '';
   document.getElementById('alerta-cpf').classList.add('d-none');
-  document.getElementById('input-cpf').focus();
+  setTimeout(() => document.getElementById('input-cpf').focus(), 150);
   document.getElementById('status-face').textContent = 'Posicione seu rosto no enquadramento';
   document.getElementById('status-face').style.color = 'var(--text-muted)';
+  const moldura = document.getElementById('moldura-oval');
+  if (moldura) moldura.classList.remove('reconhecido');
 }
 
 // ─── Etapa 2: Câmera ──────────────────────────────────
@@ -291,16 +298,18 @@ function liberarBotoes(liberar) {
 async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
 
-  const video = document.getElementById('video');
-  let confianca = 92;
-  let fotoSnapshot = null;
-
   processando = true;
   liberarBotoes(false);
   ocultarResultado();
 
-  // Mostra aviso de processamento
-  document.getElementById('status-face').innerHTML = '<i class="fas fa-spinner fa-spin text-info me-1"></i>Registrando ponto no Firebase...';
+  // Exibe a ação visual "Registrando ponto..."
+  const procCard = document.getElementById('card-processando');
+  if (procCard) procCard.classList.remove('d-none');
+  document.getElementById('status-face').innerHTML = '<i class="fas fa-spinner fa-spin text-info me-1"></i><strong>Registrando ponto...</strong> Salvando no Firebase';
+
+  const video = document.getElementById('video');
+  let confianca = 92;
+  let fotoSnapshot = null;
 
   try {
     // 1. Tira foto da câmera
@@ -312,7 +321,7 @@ async function registrarPonto(tipo) {
       capCtx.drawImage(video, 0, 0, 320, 240);
       fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.7);
 
-      // Tenta leitura biométrica no momento exato
+      // Leitura biométrica no instante da batida
       try {
         const det = await faceapi
           .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 }))
@@ -327,13 +336,15 @@ async function registrarPonto(tipo) {
     }
 
     const agora = firebase.firestore.Timestamp.now();
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const hojeMs = hoje.getTime();
 
-    // 2. Verifica se já registrou esse tipo hoje (sem exigir índice composto no Firestore)
+    // 2. Verifica duplicidade no dia (sem índice composto)
     const snap = await db.collection('registros')
       .where('cpf', '==', funcionarioAtual.cpf)
       .get();
 
-    const hojeMs = hoje.getTime();
     const jaRegistrou = snap.docs.find(doc => {
       const d = doc.data();
       const dt = d.timestamp?.toDate ? d.timestamp.toDate().getTime() : 0;
@@ -341,12 +352,13 @@ async function registrarPonto(tipo) {
     });
 
     if (jaRegistrou) {
+      if (procCard) procCard.classList.add('d-none');
       const horaExist = jaRegistrou.data().timestamp?.toDate ? jaRegistrou.data().timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
       mostrarErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
       return;
     }
 
-    // Salva registro no Firestore
+    // 3. Salva no Firestore
     const registroDoc = {
       cpf: funcionarioAtual.cpf,
       funcionarioId: funcionarioAtual.id,
@@ -361,14 +373,14 @@ async function registrarPonto(tipo) {
     };
 
     await db.collection('registros').add(registroDoc);
+    console.log('✅ Ponto salvo com sucesso no Firestore!');
 
+    if (procCard) procCard.classList.add('d-none');
     mostrarSucesso(funcionarioAtual.nome, funcionarioAtual.cargo, tipo, confianca, agora.toDate(), fotoSnapshot || funcionarioAtual.fotoUrl);
     carregarFeed();
 
-    // Volta para tela de CPF após 4.5 segundos
-    setTimeout(voltarCPF, 4500);
-
   } catch (e) {
+    if (procCard) procCard.classList.add('d-none');
     console.error('Erro ao salvar ponto:', e);
     mostrarErro('Erro ao salvar registro: ' + (e.message || 'Verifique a conexão.'));
   } finally {
@@ -380,20 +392,45 @@ async function registrarPonto(tipo) {
 function ocultarResultado() {
   const card = document.getElementById('card-resultado');
   card.classList.remove('visivel','sucesso','erro');
+  const contadorBox = document.getElementById('res-contador');
+  if (contadorBox) contadorBox.classList.add('d-none');
+  const proc = document.getElementById('card-processando');
+  if (proc) proc.classList.add('d-none');
 }
 
 function mostrarSucesso(nome, cargo, tipo, confianca, data, foto) {
   document.getElementById('res-icone').innerHTML = foto 
-    ? `<img src="${foto}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid var(--success)">`
+    ? `<img src="${foto}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:3px solid var(--success)">`
     : '<i class="fas fa-check-circle text-success"></i>';
   document.getElementById('res-nome').textContent = nome;
   document.getElementById('res-cargo').textContent = cargo;
   document.getElementById('res-tipo').innerHTML = `<span class="badge-tipo badge-${tipo}">${TIPOS[tipo]}</span>`;
   document.getElementById('res-hora').innerHTML = `<i class="fas fa-clock me-1"></i>${data.toLocaleString('pt-BR')}`;
   document.getElementById('res-conf').innerHTML = confianca ? `<i class="fas fa-fingerprint me-1"></i>Biometria: ${confianca}%` : '';
-  document.getElementById('res-msg').textContent = `Ponto registrado com sucesso! Olá, ${nome}!`;
+  document.getElementById('res-msg').innerHTML = `<strong class="text-success fs-5">Ponto registrado com sucesso!</strong><br>Olá, ${nome}! Tenha um ótimo trabalho.`;
+  
   const card = document.getElementById('card-resultado');
   card.classList.add('visivel','sucesso');
+
+  // Contador regressivo visível de 5 segundos
+  let segundos = 5;
+  const contadorBox = document.getElementById('res-contador');
+  const contadorNum = document.getElementById('segundos-restantes');
+  if (contadorBox && contadorNum) {
+    contadorBox.classList.remove('d-none');
+    contadorNum.textContent = segundos;
+  }
+
+  if (timerContagem) clearInterval(timerContagem);
+  timerContagem = setInterval(() => {
+    segundos--;
+    if (contadorNum) contadorNum.textContent = segundos;
+    if (segundos <= 0) {
+      clearInterval(timerContagem);
+      timerContagem = null;
+      voltarCPF();
+    }
+  }, 1000);
 }
 
 function mostrarErro(msg) {
