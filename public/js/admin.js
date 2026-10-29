@@ -26,6 +26,15 @@ let listaRegistrosCache = [];
 let modalFuncInstancia = null;
 let modalFotoInstancia = null;
 
+function extrairData(ts) {
+  if (!ts) return null;
+  if (ts.toDate && typeof ts.toDate === 'function') return ts.toDate();
+  if (ts.seconds) return new Date(ts.seconds * 1000);
+  if (typeof ts === 'string') return new Date(ts);
+  if (ts instanceof Date) return ts;
+  return null;
+}
+
 // ─── Inicialização ────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   // Verifica autenticação simples
@@ -554,19 +563,45 @@ function exportarCSV() {
 // ─── Espelho de Ponto ─────────────────────────────────
 async function carregarOpcoesRelatorio() {
   const select = document.getElementById('select-relatorio-func');
+  const inputMes = document.getElementById('select-relatorio-mes');
+  if (inputMes && !inputMes.value) {
+    const agora = new Date();
+    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  }
+
   if (listaFuncionariosCache.length === 0) {
     const snap = await db.collection('funcionarios').get();
     listaFuncionariosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
 
-  select.innerHTML = '<option value="">-- Selecione o Colaborador --</option>' + 
-    listaFuncionariosCache.map(f => `<option value="${f.cpf}">${f.nome} (${formatarCPF(f.cpf)})</option>`).join('');
+  if (listaFuncionariosCache.length === 0) {
+    select.innerHTML = '<option value="">Nenhum colaborador cadastrado</option>';
+    return;
+  }
+
+  select.innerHTML = listaFuncionariosCache.map(f => 
+    `<option value="${f.cpf}">${f.nome} (CPF: ${formatarCPF(f.cpf)})</option>`
+  ).join('');
+
+  // Seleciona automaticamente o primeiro funcionário se não selecionado
+  if (!select.value && listaFuncionariosCache.length > 0) {
+    select.value = listaFuncionariosCache[0].cpf;
+  }
+  await gerarEspelho();
 }
 
 async function gerarEspelho() {
-  const cpf = document.getElementById('select-relatorio-func').value;
-  const mesAno = document.getElementById('select-relatorio-mes').value;
+  const selectFunc = document.getElementById('select-relatorio-func');
+  const inputMes = document.getElementById('select-relatorio-mes');
   const tbody = document.getElementById('tabela-espelho-corpo');
+
+  if (!inputMes.value) {
+    const agora = new Date();
+    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  const cpf = selectFunc ? selectFunc.value : '';
+  const mesAno = inputMes ? inputMes.value : '';
 
   if (!cpf || !mesAno) {
     tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Selecione um funcionário e mês acima.</td></tr>';
@@ -574,26 +609,34 @@ async function gerarEspelho() {
   }
 
   const [ano, mes] = mesAno.split('-').map(Number);
-  const dataInicio = new Date(ano, mes - 1, 1);
-  const dataFim = new Date(ano, mes, 0, 23, 59, 59);
+  const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
+  const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
+
+  const cleanCpf = cpf.replace(/\D/g, '');
+  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
+  const tituloEl = document.getElementById('titulo-espelho');
+  if (tituloEl) {
+    tituloEl.textContent = `Folha de Ponto - ${func ? func.nome : 'Colaborador'} (${String(mes).padStart(2, '0')}/${ano})`;
+  }
 
   tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Calculando espelho...</td></tr>';
 
   try {
-    const snap = await db.collection('registros')
-      .where('cpf', '==', cpf)
-      .get();
+    const snap = await db.collection('registros').get();
 
     const tInicioMs = dataInicio.getTime();
     const tFimMs = dataFim.getTime();
+
     const registros = snap.docs.map(d => d.data()).filter(r => {
-      const dt = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : 0;
-      return dt >= tInicioMs && dt <= tFimMs;
+      const rCpf = (r.cpf || '').replace(/\D/g, '');
+      const dt = extrairData(r.timestamp)?.getTime() || 0;
+      return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
     });
 
-    // Agrupa por dia do mês
     const diasMes = dataFim.getDate();
     let linhasHtml = '';
+    let totalMinutosMes = 0;
+    let diasTrabalhados = 0;
 
     for (let dia = 1; dia <= diasMes; dia++) {
       const dataDia = new Date(ano, mes - 1, dia);
@@ -601,17 +644,46 @@ async function gerarEspelho() {
       const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][dataDia.getDay()];
 
       const regsDia = registros.filter(r => {
-        const dt = r.timestamp?.toDate ? r.timestamp.toDate() : null;
-        return dt && dt.getDate() === dia;
+        const dt = extrairData(r.timestamp);
+        return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
       });
 
-      const entrada = regsDia.find(r => r.tipo === 'entrada')?.timestamp?.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '--:--';
-      const almocoSaida = regsDia.find(r => r.tipo === 'almoco_saida')?.timestamp?.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '--:--';
-      const almocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno')?.timestamp?.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '--:--';
-      const saida = regsDia.find(r => r.tipo === 'saida')?.timestamp?.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '--:--';
+      const regEntrada = regsDia.find(r => r.tipo === 'entrada');
+      const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
+      const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
+      const regSaida = regsDia.find(r => r.tipo === 'saida');
+
+      const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+      const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+      const almocoRetorno = regAlmocoRetorno ? extrairData(regAlmocoRetorno.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+      const saida = regSaida ? extrairData(regSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+
+      // Cálculo de minutos trabalhados
+      let minutosDia = 0;
+      const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
+
+      if (regEntrada && regAlmocoSaida) {
+        minutosDia += Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000));
+      }
+      if (regAlmocoRetorno && regSaida) {
+        minutosDia += Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
+      } else if (regEntrada && regSaida && !regAlmocoSaida && !regAlmocoRetorno) {
+        minutosDia += Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
+      }
+
+      if (regsDia.length > 0) diasTrabalhados++;
+      totalMinutosMes += minutosDia;
+
+      let horasDiaStr = '-';
+      if (minutosDia > 0) {
+        const h = Math.floor(minutosDia / 60);
+        const m = minutosDia % 60;
+        horasDiaStr = `<span class="badge bg-success">${h}h ${String(m).padStart(2,'0')}m</span>`;
+      } else if (regsDia.length > 0) {
+        horasDiaStr = `<span class="badge bg-info">Em andamento</span>`;
+      }
 
       const isFimDeSemana = dataDia.getDay() === 0 || dataDia.getDay() === 6;
-      const temRegistro = regsDia.length > 0;
 
       linhasHtml += `
         <tr class="${isFimDeSemana ? 'opacity-75' : ''}">
@@ -620,12 +692,27 @@ async function gerarEspelho() {
           <td><span class="${almocoSaida !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaida}</span></td>
           <td><span class="${almocoRetorno !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetorno}</span></td>
           <td><span class="${saida !== '--:--' ? 'text-danger fw-bold' : 'text-muted'}">${saida}</span></td>
-          <td>${temRegistro ? '<span class="badge bg-secondary">Calculado</span>' : '<span class="text-muted">-</span>'}</td>
+          <td>${horasDiaStr}</td>
         </tr>
       `;
     }
 
     tbody.innerHTML = linhasHtml;
+
+    // Atualiza cards de resumo
+    const totalH = Math.floor(totalMinutosMes / 60);
+    const totalM = totalMinutosMes % 60;
+    const elTotalHoras = document.getElementById('total-horas-mes');
+    if (elTotalHoras) elTotalHoras.textContent = `${totalH}h ${String(totalM).padStart(2,'0')}m`;
+
+    const elTotalDias = document.getElementById('total-dias-mes');
+    if (elTotalDias) elTotalDias.textContent = `${diasTrabalhados} dia${diasTrabalhados === 1 ? '' : 's'}`;
+
+    const mediaMin = diasTrabalhados > 0 ? Math.round(totalMinutosMes / diasTrabalhados) : 0;
+    const mediaH = Math.floor(mediaMin / 60);
+    const mediaM = mediaMin % 60;
+    const elMedia = document.getElementById('media-horas-dia');
+    if (elMedia) elMedia.textContent = `${mediaH}h ${String(mediaM).padStart(2,'0')}m`;
 
   } catch (err) {
     console.error('Erro ao gerar espelho:', err);

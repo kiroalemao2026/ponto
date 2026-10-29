@@ -209,28 +209,59 @@
       <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
         <div>
           <h3 class="fw-bold mb-1">Espelho de Ponto</h3>
-          <p class="text-muted mb-0">Cálculo de horas trabalhadas por funcionário</p>
+          <p class="text-muted mb-0">Controle mensal de horas trabalhadas</p>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="gerarEspelho()">
-          <i class="fas fa-calculator me-1"></i> Recalcular
-        </button>
-      </div>
-
-      <div class="card-dark p-4 mb-4">
-        <div class="row g-2">
-          <div class="col-md-6">
-            <label class="form-label">Selecione o Colaborador:</label>
-            <select id="select-relatorio-func" class="form-select" onchange="gerarEspelho()"></select>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label">Mês / Ano:</label>
-            <input type="month" id="select-relatorio-mes" class="form-control" onchange="gerarEspelho()">
-          </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-success btn-sm" onclick="window.print()">
+            <i class="fas fa-print me-1"></i> Imprimir / PDF
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="gerarEspelho()">
+            <i class="fas fa-sync-alt me-1"></i> Atualizar
+          </button>
         </div>
       </div>
 
       <div class="card-dark p-4">
-        <h5 class="fw-bold mb-3" id="titulo-espelho">Folha de Ponto</h5>
+        <!-- Barra de Seleção Superior Integrada -->
+        <div class="row g-3 mb-4 p-3 bg-secondary bg-opacity-25 rounded-3 align-items-end">
+          <div class="col-md-6">
+            <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-user me-1"></i> Colaborador:</label>
+            <select id="select-relatorio-func" class="form-select form-select-lg" onchange="gerarEspelho()"></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-calendar-alt me-1"></i> Mês / Ano de Referência:</label>
+            <input type="month" id="select-relatorio-mes" class="form-control form-control-lg" onchange="gerarEspelho()">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-danger btn-lg w-100" onclick="gerarEspelho()">
+              <i class="fas fa-search me-1"></i> Filtrar
+            </button>
+          </div>
+        </div>
+
+        <!-- Resumo do Mês -->
+        <div class="row g-3 mb-4" id="resumo-horas-mes">
+          <div class="col-sm-4">
+            <div class="p-3 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Total de Horas no Mês</span>
+              <h4 class="fw-bold text-success mb-0 mt-1" id="total-horas-mes">0h 00m</h4>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="p-3 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Dias Trabalhados</span>
+              <h4 class="fw-bold text-info mb-0 mt-1" id="total-dias-mes">0 dias</h4>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="p-3 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Média Diária</span>
+              <h4 class="fw-bold text-light mb-0 mt-1" id="media-horas-dia">0h 00m</h4>
+            </div>
+          </div>
+        </div>
+
+        <h5 class="fw-bold mb-3" id="titulo-espelho">Folha de Ponto Detalhada</h5>
         <div class="table-responsive">
           <table class="admin-table">
             <thead>
@@ -244,7 +275,7 @@
               </tr>
             </thead>
             <tbody id="tabela-espelho-corpo">
-              <tr><td colspan="6" class="text-center py-4 text-muted">Selecione um funcionário e mês acima</td></tr>
+              <tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando espelho de ponto...</td></tr>
             </tbody>
           </table>
         </div>
