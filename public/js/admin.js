@@ -88,12 +88,12 @@ function navegarAba(aba, el) {
   document.querySelectorAll('.aba-secao').forEach(sec => sec.classList.add('d-none'));
   document.querySelectorAll('.nav-item-link').forEach(link => link.classList.remove('ativo'));
 
-  document.getElementById(`aba-${aba}`).classList.remove('d-none');
-  el.classList.add('ativo');
+  const sec = document.getElementById(`aba-${aba}`);
+  if (sec) sec.classList.remove('d-none');
+  if (el) el.classList.add('ativo');
 
   if (aba === 'dashboard') carregarDadosGerais();
   if (aba === 'funcionarios') carregarFuncionarios();
-  if (aba === 'registros') carregarRegistros();
   if (aba === 'relatorios') carregarOpcoesRelatorio();
 }
 
@@ -590,96 +590,44 @@ async function excluirFuncionario(id, nome) {
   }
 }
 
-// ─── Registros de Ponto ───────────────────────────────
-async function carregarRegistros() {
-  const tbody = document.getElementById('tabela-todos-registros');
-  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando histórico do Firebase...</td></tr>';
-
+// ─── Exportação de Registros (CSV) ────────────────────
+async function exportarCSV() {
   try {
-    const snap = await db.collection('registros').get();
-    let lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    // Ordena do mais recente para o mais antigo em memória
-    lista.sort((a, b) => {
-      const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
-      const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
-      return tb - ta;
-    });
-
-    const dtInicio = document.getElementById('filtro-data-inicio').value;
-    const dtFim = document.getElementById('filtro-data-fim').value;
-
-    if (dtInicio) {
-      const inicioMs = new Date(dtInicio + 'T00:00:00').getTime();
-      lista = lista.filter(r => {
-        const t = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
-        return t >= inicioMs;
-      });
-    }
-    if (dtFim) {
-      const fimMs = new Date(dtFim + 'T23:59:59').getTime();
-      lista = lista.filter(r => {
-        const t = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
-        return t <= fimMs;
-      });
+    let registros = listaRegistrosCache;
+    if (!registros || registros.length === 0) {
+      const snap = await db.collection('registros').get();
+      registros = snap.docs.map(d => d.data());
     }
 
-    listaRegistrosCache = lista;
-
-    if (listaRegistrosCache.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro no período selecionado.</td></tr>';
+    if (!registros || registros.length === 0) {
+      alert('Nenhum registro encontrado para exportar.');
       return;
     }
 
-    tbody.innerHTML = listaRegistrosCache.map(r => {
-      const dataHora = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('pt-BR') : '--';
-      const foto = r.fotoSnapshot || '';
-      return `
-        <tr>
-          <td><i class="fas fa-clock text-muted me-1"></i> ${dataHora}</td>
-          <td><strong class="text-light">${r.funcionarioNome || 'Desconhecido'}</strong></td>
-          <td><code>${formatarCPF(r.cpf || '')}</code></td>
-          <td><span class="badge-tipo badge-${r.tipo}">${TIPOS_LABEL[r.tipo] || r.tipo}</span></td>
-          <td><i class="fas fa-fingerprint text-accent me-1"></i> ${r.confianca || 95}%</td>
-          <td>
-            ${foto 
-              ? `<img src="${foto}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="verFotoAmpliada('${foto}', '${r.funcionarioNome} - ${dataHora}')">`
-              : '<span class="text-muted small">Sem foto</span>'}
-          </td>
-        </tr>
-      `;
-    }).join('');
+    // Ordena do mais recente para o mais antigo
+    registros.sort((a, b) => {
+      const ta = extrairData(a.timestamp)?.getTime() || 0;
+      const tb = extrairData(b.timestamp)?.getTime() || 0;
+      return tb - ta;
+    });
 
+    let csv = 'Data/Hora,Nome,CPF,Tipo,Confianca\n';
+    registros.forEach(r => {
+      const dt = extrairData(r.timestamp);
+      const dataHora = dt ? dt.toLocaleString('pt-BR') : '';
+      csv += `"${dataHora}","${r.funcionarioNome || ''}","${formatarCPF(r.cpf || '')}","${TIPOS_LABEL[r.tipo] || r.tipo}","${r.confianca || 95}%"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `registros_ponto_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.click();
   } catch (err) {
-    console.error('Erro ao carregar registros:', err);
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">Erro ao carregar: ${err.message}</td></tr>`;
+    console.error('Erro ao exportar CSV:', err);
+    alert('Erro ao exportar: ' + err.message);
   }
-}
-
-function limparFiltrosData() {
-  document.getElementById('filtro-data-inicio').value = '';
-  document.getElementById('filtro-data-fim').value = '';
-  carregarRegistros();
-}
-
-function exportarCSV() {
-  if (listaRegistrosCache.length === 0) {
-    alert('Nenhum registro para exportar.');
-    return;
-  }
-
-  let csv = 'Data/Hora,Nome,CPF,Tipo,Confianca\n';
-  listaRegistrosCache.forEach(r => {
-    const dataHora = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('pt-BR') : '';
-    csv += `"${dataHora}","${r.funcionarioNome || ''}","${r.cpf || ''}","${TIPOS_LABEL[r.tipo] || r.tipo}","${r.confianca || 95}%"\n`;
-  });
-
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `registros_ponto_${new Date().toISOString().slice(0, 10)}.csv`);
-  link.click();
 }
 
 // ─── Espelho de Ponto & Horas Extras ───────────────────

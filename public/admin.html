@@ -31,9 +31,6 @@
       <a href="#" class="nav-item-link" onclick="navegarAba('funcionarios', this); return false;">
         <i class="fas fa-users"></i> Funcionários
       </a>
-      <a href="#" class="nav-item-link" onclick="navegarAba('registros', this); return false;">
-        <i class="fas fa-calendar-check"></i> Registros de Ponto
-      </a>
       <a href="#" class="nav-item-link" onclick="navegarAba('relatorios', this); return false;">
         <i class="fas fa-file-invoice"></i> Espelho / Relatórios
       </a>
@@ -52,14 +49,19 @@
 
     <!-- ── ABA 1: DASHBOARD ── -->
     <section id="aba-dashboard" class="aba-secao">
-      <div class="d-flex justify-content-between align-items-center mb-4">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
         <div>
           <h3 class="fw-bold mb-1">Visão Geral</h3>
           <p class="text-muted mb-0" id="dash-data-atual"></p>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="carregarDadosGerais()">
-          <i class="fas fa-sync-alt me-1"></i> Atualizar
-        </button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-success btn-sm" onclick="exportarCSV()">
+            <i class="fas fa-file-csv me-1"></i> Exportar CSV
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="carregarDadosGerais()">
+            <i class="fas fa-sync-alt me-1"></i> Atualizar
+          </button>
+        </div>
       </div>
 
       <!-- Cards de Métricas -->
@@ -152,54 +154,7 @@
       </div>
     </section>
 
-    <!-- ── ABA 3: REGISTROS DE PONTO ── -->
-    <section id="aba-registros" class="aba-secao d-none">
-      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-        <div>
-          <h3 class="fw-bold mb-1">Registros de Ponto</h3>
-          <p class="text-muted mb-0">Histórico completo de entradas e saídas</p>
-        </div>
-        <button class="btn btn-outline-success" onclick="exportarCSV()">
-          <i class="fas fa-file-csv me-2"></i>Exportar CSV
-        </button>
-      </div>
-
-      <div class="card-dark p-4">
-        <div class="row g-2 mb-3">
-          <div class="col-md-4">
-            <input type="date" id="filtro-data-inicio" class="form-control" onchange="carregarRegistros()">
-          </div>
-          <div class="col-md-4">
-            <input type="date" id="filtro-data-fim" class="form-control" onchange="carregarRegistros()">
-          </div>
-          <div class="col-md-4">
-            <button class="btn btn-secondary w-100" onclick="limparFiltrosData()">
-              <i class="fas fa-eraser me-1"></i> Ver Todos
-            </button>
-          </div>
-        </div>
-
-        <div class="table-responsive">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Data e Hora</th>
-                <th>Colaborador</th>
-                <th>CPF</th>
-                <th>Tipo</th>
-                <th>Confiança</th>
-                <th>Foto da Batida</th>
-              </tr>
-            </thead>
-            <tbody id="tabela-todos-registros">
-              <tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando histórico...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── ABA 4: ESPELHO / RELATÓRIO ── -->
+    <!-- ── ABA 3: ESPELHO / RELATÓRIO ── -->
     <section id="aba-relatorios" class="aba-secao d-none">
       <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2 no-print">
         <div>
