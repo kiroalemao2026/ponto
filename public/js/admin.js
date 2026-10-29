@@ -563,11 +563,14 @@ async function gerarEspelho() {
   try {
     const snap = await db.collection('registros')
       .where('cpf', '==', cpf)
-      .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(dataInicio))
-      .where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(dataFim))
       .get();
 
-    const registros = snap.docs.map(d => d.data());
+    const tInicioMs = dataInicio.getTime();
+    const tFimMs = dataFim.getTime();
+    const registros = snap.docs.map(d => d.data()).filter(r => {
+      const dt = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : 0;
+      return dt >= tInicioMs && dt <= tFimMs;
+    });
 
     // Agrupa por dia do mês
     const diasMes = dataFim.getDate();
