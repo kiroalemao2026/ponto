@@ -268,14 +268,81 @@ function pararCamera() {
   liberarBotoes(false);
 }
 
+// ─── Validação Biométrica & Liveness Rigorosa (Padrão Bancário) ───
+function validarEnquadramentoCompleto(deteccao, videoEl) {
+  if (!deteccao || !deteccao.detection || !deteccao.landmarks) {
+    return { valido: false, motivo: 'Posicione seu rosto dentro da moldura' };
+  }
+
+  const score = deteccao.detection.score || 0;
+  // 1. Confiança mínima da detecção (impede falsas detecções e borrões)
+  if (score < 0.55) {
+    return { valido: false, motivo: 'Ilumine o ambiente e olhe para a câmera' };
+  }
+
+  const vw = videoEl.videoWidth || 640;
+  const vh = videoEl.videoHeight || 480;
+  const box = deteccao.detection.box;
+
+  // 2. Tamanho mínimo da face (impede rosto cortado ou muito longe)
+  if (box.width < vw * 0.18 || box.height < vh * 0.22) {
+    return { valido: false, motivo: 'Aproxime seu rosto da câmera' };
+  }
+
+  // 3. Centralização dentro do círculo da moldura (impede meia cabeça nas bordas)
+  const centroX = box.x + box.width / 2;
+  const centroY = box.y + box.height / 2;
+  if (centroX < vw * 0.22 || centroX > vw * 0.78 || centroY < vh * 0.18 || centroY > vh * 0.82) {
+    return { valido: false, motivo: 'Centralize seu rosto dentro da moldura' };
+  }
+
+  // 4. Verificação anatômica completa (impede meia cabeça / perfil)
+  const leftEye = deteccao.landmarks.getLeftEye();
+  const rightEye = deteccao.landmarks.getRightEye();
+  const nose = deteccao.landmarks.getNose();
+  const mouth = deteccao.landmarks.getMouth();
+
+  if (!leftEye.length || !rightEye.length || !nose.length || !mouth.length) {
+    return { valido: false, motivo: 'Mantenha o rosto inteiro de frente' };
+  }
+
+  // Centros médios dos olhos
+  const leftEyeX = leftEye.reduce((s, p) => s + p.x, 0) / leftEye.length;
+  const leftEyeY = leftEye.reduce((s, p) => s + p.y, 0) / leftEye.length;
+  const rightEyeX = rightEye.reduce((s, p) => s + p.x, 0) / rightEye.length;
+  const rightEyeY = rightEye.reduce((s, p) => s + p.y, 0) / rightEye.length;
+
+  // Distância entre os olhos (garante que os DOIS olhos estão visíveis)
+  const distOlhos = Math.hypot(rightEyeX - leftEyeX, rightEyeY - leftEyeY);
+  if (distOlhos < vw * 0.075) {
+    return { valido: false, motivo: 'Olhe de frente com ambos os olhos visíveis' };
+  }
+
+  // Inclinação excessiva da cabeça (roll)
+  const inclinacao = Math.abs(rightEyeY - leftEyeY) / (Math.abs(rightEyeX - leftEyeX) || 1);
+  if (inclinacao > 0.40) {
+    return { valido: false, motivo: 'Mantenha a cabeça reta' };
+  }
+
+  // Nariz deve estar entre os dois olhos (impede perfil lateral)
+  const noseTip = nose[3] || nose[0];
+  const minOlhoX = Math.min(leftEyeX, rightEyeX);
+  const maxOlhoX = Math.max(leftEyeX, rightEyeX);
+  if (noseTip.x < minOlhoX - 10 || noseTip.x > maxOlhoX + 10) {
+    return { valido: false, motivo: 'Olhe diretamente para a frente' };
+  }
+
+  return { valido: true };
+}
+
 // ─── Loop de Reconhecimento ───────────────────────────
 function iniciarLoop() {
   const video = document.getElementById('video');
   const moldura = document.getElementById('moldura-oval');
   const statusFace = document.getElementById('status-face');
 
-  // Opções sensíveis do TinyFaceDetector
-  const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 });
+  // Opções de alta precisão (inputSize 416 e threshold 0.55 para evitar falsos positivos)
+  const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.55 });
 
   loopReconhecimento = setInterval(async () => {
     if (!streamCamera || !video.videoWidth || processando) return;
@@ -286,45 +353,44 @@ function iniciarLoop() {
         .withFaceLandmarks()
         .withFaceDescriptor();
 
-      if (!deteccao) {
-        // NENHUM ROSTO DETECTADO NA CÂMERA
+      // 1. Checagem de presença e enquadramento completo (impede meia cabeça)
+      const validacao = validarEnquadramentoCompleto(deteccao, video);
+      if (!validacao.valido) {
         liberarBotoes(false);
         if (moldura) {
           moldura.classList.remove('reconhecido');
           moldura.classList.remove('nao-reconhecido');
         }
-        statusFace.innerHTML = '<i class="fas fa-user-slash text-warning me-1"></i>Posicione seu rosto dentro da moldura para liberar os botões';
+        statusFace.innerHTML = `<i class="fas fa-exclamation-triangle text-warning me-1"></i>${validacao.motivo}`;
         statusFace.style.color = '#ffc107';
         return;
       }
 
-      // ROSTO DETECTADO: Compara biometria neural com o cadastro do funcionário
+      // 2. Validação biométrica neural estrita com o colaborador do CPF
       if (funcionarioAtual && funcionarioAtual.faceDescriptor) {
         const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
 
-        // Limiar seguro de correspondência (<= 0.58)
-        if (distancia <= 0.58) {
-          // ROSTO RECONHECIDO COM SUCESSO!
-          const confianca = Math.round(Math.max(68, Math.min(99.9, (1 - (distancia - 0.20) / 0.40) * 100)));
+        // Limiar seguro bancário (<= 0.48): impede qualquer outra pessoa
+        if (distancia <= 0.48) {
+          const confianca = Math.round(Math.max(70, Math.min(99.9, (1 - (distancia - 0.20) / 0.35) * 100)));
           if (moldura) {
             moldura.classList.remove('nao-reconhecido');
             moldura.classList.add('reconhecido');
           }
-          statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Reconhecido!</strong> (${confianca}%) — Toque no botão desejado`;
+          statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Completo Identificado!</strong> (${confianca}%) — Toque no botão`;
           statusFace.style.color = '#28a745';
           liberarBotoes(true);
         } else {
-          // ROSTO DETECTADO, MAS NÃO É O DO COLABORADOR DO CPF!
+          // Rosto completo presente, mas NÃO é o colaborador cadastrado
           liberarBotoes(false);
           if (moldura) {
             moldura.classList.remove('reconhecido');
             moldura.classList.add('nao-reconhecido');
           }
-          statusFace.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i><strong>Rosto não reconhecido</strong> para ${funcionarioAtual.nome}`;
+          statusFace.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i><strong>Rosto não confere</strong> com ${funcionarioAtual.nome}`;
           statusFace.style.color = '#dc3545';
         }
       } else {
-        // Se ainda não tiver biometria prévia gravada
         if (moldura) moldura.classList.add('reconhecido');
         statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>Rosto Enquadrado! Toque no botão desejado`;
         statusFace.style.color = '#28a745';
@@ -334,7 +400,7 @@ function iniciarLoop() {
     } catch (e) {
       console.warn('Loop facial:', e);
     }
-  }, 350);
+  }, 300);
 }
 
 function liberarBotoes(liberar) {
@@ -440,22 +506,23 @@ async function registrarPonto(tipo) {
 
       // Verificação biométrica instantânea no momento da batida
       const det = await faceapi
-        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 }))
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.55 }))
         .withFaceLandmarks()
         .withFaceDescriptor();
 
-      if (!det) {
-        abrirOverlayErro("Rosto não detectado no momento do clique! Olhe diretamente para a câmera.");
+      const validacaoMomento = validarEnquadramentoCompleto(det, video);
+      if (!validacaoMomento.valido) {
+        abrirOverlayErro(`Atenção: ${validacaoMomento.motivo}. Enquadre o rosto por completo para registrar o ponto.`);
         return;
       }
 
       if (funcionarioAtual.faceDescriptor) {
         const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
-        if (d > 0.58) {
-          abrirOverlayErro(`Biometria não confirmada! O rosto na câmera não é o do colaborador ${funcionarioAtual.nome}.`);
+        if (d > 0.48) {
+          abrirOverlayErro(`Biometria não confirmada! O rosto na câmera não confere com o cadastro de ${funcionarioAtual.nome}.`);
           return;
         }
-        confianca = Math.round(Math.max(68, Math.min(99.9, (1 - (d - 0.20) / 0.40) * 100)));
+        confianca = Math.round(Math.max(70, Math.min(99.9, (1 - (d - 0.20) / 0.35) * 100)));
       }
     } else {
       abrirOverlayErro("Câmera indisponível. É obrigatório o reconhecimento facial para bater o ponto.");
