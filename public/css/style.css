@@ -83,17 +83,44 @@ body {
   width: 100%; display: flex;
   flex-wrap: wrap; gap: 1.5rem; justify-content: center;
 }
-.camera-col { flex: 0 0 auto; width: 360px; }
+.camera-col { flex: 0 0 auto; width: 360px; max-width: 100%; }
 .lateral-col { flex: 1 1 320px; max-width: 480px; }
 
 .camera-wrapper {
   position: relative; background: #000;
-  border-radius: 10px; overflow: hidden;
-  aspect-ratio: 4/3;
+  border-radius: 14px; overflow: hidden;
+  height: 380px;
+  max-width: 100%;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
-.camera-wrapper video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camera-wrapper video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* Efeito espelho natural da câmera frontal */
+  display: block;
+}
 .camera-overlay-canvas {
   position: absolute; inset: 0; pointer-events: none;
+}
+
+/* ─── Moldura Oval Biométrica ────────────────────────── */
+.moldura-oval {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 210px;
+  height: 280px;
+  border: 3px dashed rgba(255, 255, 255, 0.45);
+  border-radius: 50%;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+}
+.moldura-oval.reconhecido {
+  border: 3.5px solid #28a745;
+  box-shadow: 0 0 30px rgba(40, 167, 69, 0.7), 0 0 0 9999px rgba(0, 0, 0, 0.25);
 }
 .camera-status {
   position: absolute; bottom: .5rem; left: 50%;

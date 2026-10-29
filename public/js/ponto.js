@@ -239,7 +239,7 @@ function pararCamera() {
 // ─── Loop de Reconhecimento ───────────────────────────
 function iniciarLoop() {
   const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas-overlay');
+  const moldura = document.getElementById('moldura-oval');
   const statusFace = document.getElementById('status-face');
 
   // Opções sensíveis do TinyFaceDetector
@@ -248,45 +248,34 @@ function iniciarLoop() {
   loopReconhecimento = setInterval(async () => {
     if (!streamCamera || !video.videoWidth || processando) return;
 
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-
     try {
       const deteccao = await faceapi
         .detectSingleFace(video, opcoesDetector)
         .withFaceLandmarks()
         .withFaceDescriptor();
 
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       if (!deteccao) {
-        statusFace.innerHTML = '<i class="fas fa-user text-muted me-1"></i>Posicione seu rosto de frente para a câmera';
+        if (moldura) moldura.classList.remove('reconhecido');
+        statusFace.innerHTML = '<i class="fas fa-user text-muted me-1"></i>Enquadre seu rosto no círculo acima';
         statusFace.style.color = 'var(--text-muted)';
         return;
       }
 
       // Compara descriptor com o do funcionário
-      let confianca = 90;
+      let confianca = 92;
       if (funcionarioAtual && funcionarioAtual.faceDescriptor) {
         const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
         confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (distancia - 0.20) / 0.45) * 100)));
       }
 
-      const box = deteccao.detection.box;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#28a745';
-      ctx.fillStyle = 'rgba(40,167,69,0.15)';
-      ctx.strokeRect(box.x, box.y, box.width, box.height);
-      ctx.fillRect(box.x, box.y, box.width, box.height);
-
-      statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Identificado!</strong> (${confianca}% de precisão) — Pode bater o ponto`;
+      if (moldura) moldura.classList.add('reconhecido');
+      statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Enquadrado!</strong> (${confianca}% de precisão) — Toque no botão`;
       statusFace.style.color = '#28a745';
 
     } catch (e) {
       console.warn('Loop facial:', e);
     }
-  }, 400);
+  }, 350);
 }
 
 function liberarBotoes(liberar) {
@@ -339,18 +328,21 @@ async function registrarPonto(tipo) {
 
     const agora = firebase.firestore.Timestamp.now();
 
-    // Verifica se já registrou esse tipo hoje
-    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    // 2. Verifica se já registrou esse tipo hoje (sem exigir índice composto no Firestore)
     const snap = await db.collection('registros')
       .where('cpf', '==', funcionarioAtual.cpf)
-      .where('tipo', '==', tipo)
-      .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(hoje))
-      .limit(1)
       .get();
 
-    if (!snap.empty) {
-      const horaExist = snap.docs[0].data().timestamp.toDate();
-      mostrarErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje às ${horaExist.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})}.`);
+    const hojeMs = hoje.getTime();
+    const jaRegistrou = snap.docs.find(doc => {
+      const d = doc.data();
+      const dt = d.timestamp?.toDate ? d.timestamp.toDate().getTime() : 0;
+      return d.tipo === tipo && dt >= hojeMs;
+    });
+
+    if (jaRegistrou) {
+      const horaExist = jaRegistrou.data().timestamp?.toDate ? jaRegistrou.data().timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
+      mostrarErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
       return;
     }
 
