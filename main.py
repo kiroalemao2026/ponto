@@ -59,74 +59,25 @@ app.include_router(funcionarios.router)
 app.include_router(ponto.router)
 app.include_router(relatorios.router)
 
-# Rota raiz: serve o frontend Firebase moderno
+# ===== ROTAS DE PÁGINAS FIREBASE (DIRETO DO PUBLIC) =====
 from fastapi.responses import FileResponse
 
 @app.get("/", response_class=FileResponse)
-async def pagina_inicial_firebase():
-    if os.path.exists("public/index.html"):
-        return FileResponse("public/index.html")
-    return HTMLResponse("<h1>Carregando...</h1>")
+async def rota_raiz():
+    return FileResponse("public/index.html")
 
+@app.get("/login", response_class=FileResponse)
 @app.get("/login.html", response_class=FileResponse)
-async def pagina_login_firebase():
+async def rota_login():
     return FileResponse("public/login.html")
 
+@app.get("/admin", response_class=FileResponse)
+@app.get("/admin/", response_class=FileResponse)
 @app.get("/admin.html", response_class=FileResponse)
-async def pagina_admin_firebase():
+@app.get("/admin/funcionarios", response_class=FileResponse)
+@app.get("/admin/relatorios", response_class=FileResponse)
+async def rota_admin():
     return FileResponse("public/admin.html")
-
-
-
-def inicializar_dados():
-    """Cria dados iniciais se não existirem."""
-    db = SessionLocal()
-    try:
-        # Cria admin padrão
-        admin_existente = db.query(AdminUser).filter(AdminUser.username == "admin").first()
-        if not admin_existente:
-            admin = AdminUser(
-                username="admin",
-                senha_hash=criar_hash_senha("admin123"),
-                nome="Administrador",
-                ativo=True
-            )
-            db.add(admin)
-            db.commit()
-            print("✅ Admin padrão criado: admin / admin123")
-    finally:
-        db.close()
-
-
-# Inicializa dados ao subir
-inicializar_dados()
-
-
-# ===== ROTAS DE PÁGINAS =====
-
-@app.get("/", response_class=HTMLResponse)
-async def pagina_inicial(request: Request):
-    return templates.TemplateResponse(request, "index.html")
-
-
-@app.get("/admin", response_class=HTMLResponse)
-async def pagina_admin(request: Request):
-    return templates.TemplateResponse(request, "admin/dashboard.html")
-
-
-@app.get("/admin/funcionarios", response_class=HTMLResponse)
-async def pagina_funcionarios(request: Request):
-    return templates.TemplateResponse(request, "admin/funcionarios.html")
-
-
-@app.get("/admin/relatorios", response_class=HTMLResponse)
-async def pagina_relatorios(request: Request):
-    return templates.TemplateResponse(request, "admin/relatorios.html")
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def pagina_login(request: Request):
-    return templates.TemplateResponse(request, "login.html")
 
 
 if __name__ == "__main__":

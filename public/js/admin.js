@@ -105,15 +105,26 @@ async function carregarDadosGerais() {
     const totalAtivos = listaFuncionariosCache.filter(f => f.ativo !== false).length;
     document.getElementById('dash-total-func').textContent = totalAtivos;
 
-    // 2. Registros de Hoje
+    // 2. Todos os Registros do Firestore (sem exigência de índice)
+    const snapReg = await db.collection('registros').get();
+    let todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Ordena do mais recente para o mais antigo em memória
+    todosRegistros.sort((a, b) => {
+      const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
+      const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
+      return tb - ta;
+    });
+
     const inicioHoje = new Date();
     inicioHoje.setHours(0, 0, 0, 0);
+    const inicioHojeMs = inicioHoje.getTime();
 
-    const snapReg = await db.collection('registros')
-      .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(inicioHoje))
-      .get();
+    const registrosHoje = todosRegistros.filter(r => {
+      const dt = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
+      return dt >= inicioHojeMs;
+    });
 
-    const registrosHoje = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
     document.getElementById('dash-batidas-hoje').textContent = registrosHoje.length;
 
     // Presentes (que bateram entrada hoje)
@@ -122,19 +133,14 @@ async function carregarDadosGerais() {
     document.getElementById('dash-ausentes').textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
 
     // 3. Tabela de últimos registros
-    const snapUltimos = await db.collection('registros')
-      .orderBy('timestamp', 'desc')
-      .limit(10)
-      .get();
-
     const tbody = document.getElementById('tabela-dash-ultimos');
-    if (snapUltimos.empty) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro encontrado hoje.</td></tr>';
+    if (todosRegistros.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro encontrado ainda.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = snapUltimos.docs.map(d => {
-      const r = d.data();
+    const ultimos10 = todosRegistros.slice(0, 10);
+    tbody.innerHTML = ultimos10.map(r => {
       const dataHora = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('pt-BR') : '--';
       const foto = r.fotoSnapshot || '';
       return `
@@ -456,25 +462,38 @@ async function excluirFuncionario(id, nome) {
 // ─── Registros de Ponto ───────────────────────────────
 async function carregarRegistros() {
   const tbody = document.getElementById('tabela-todos-registros');
-  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando histórico...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando histórico do Firebase...</td></tr>';
 
   try {
-    let query = db.collection('registros').orderBy('timestamp', 'desc');
+    const snap = await db.collection('registros').get();
+    let lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Ordena do mais recente para o mais antigo em memória
+    lista.sort((a, b) => {
+      const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
+      const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
+      return tb - ta;
+    });
 
     const dtInicio = document.getElementById('filtro-data-inicio').value;
     const dtFim = document.getElementById('filtro-data-fim').value;
 
     if (dtInicio) {
-      const inicio = new Date(dtInicio + 'T00:00:00');
-      query = query.where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(inicio));
+      const inicioMs = new Date(dtInicio + 'T00:00:00').getTime();
+      lista = lista.filter(r => {
+        const t = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
+        return t >= inicioMs;
+      });
     }
     if (dtFim) {
-      const fim = new Date(dtFim + 'T23:59:59');
-      query = query.where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(fim));
+      const fimMs = new Date(dtFim + 'T23:59:59').getTime();
+      lista = lista.filter(r => {
+        const t = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
+        return t <= fimMs;
+      });
     }
 
-    const snap = await query.limit(100).get();
-    listaRegistrosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    listaRegistrosCache = lista;
 
     if (listaRegistrosCache.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Nenhum registro no período selecionado.</td></tr>';
