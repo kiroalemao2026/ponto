@@ -254,7 +254,7 @@ async function iniciarCamera() {
     await video.play().catch(() => {});
 
     status.innerHTML = '<i class="fas fa-circle text-success"></i> Câmera ativa';
-    liberarBotoes(true);
+    liberarBotoes(false); // Inicia bloqueado até o rosto ser reconhecido!
     iniciarLoop();
   } catch (err) {
     console.error('Erro ao abrir câmera:', err);
@@ -265,6 +265,7 @@ async function iniciarCamera() {
 function pararCamera() {
   if (loopReconhecimento) { clearInterval(loopReconhecimento); loopReconhecimento = null; }
   if (streamCamera) { streamCamera.getTracks().forEach(t => t.stop()); streamCamera = null; }
+  liberarBotoes(false);
 }
 
 // ─── Loop de Reconhecimento ───────────────────────────
@@ -286,22 +287,49 @@ function iniciarLoop() {
         .withFaceDescriptor();
 
       if (!deteccao) {
-        if (moldura) moldura.classList.remove('reconhecido');
-        statusFace.innerHTML = '<i class="fas fa-user text-muted me-1"></i>Enquadre seu rosto no círculo acima';
-        statusFace.style.color = 'var(--text-muted)';
+        // NENHUM ROSTO DETECTADO NA CÂMERA
+        liberarBotoes(false);
+        if (moldura) {
+          moldura.classList.remove('reconhecido');
+          moldura.classList.remove('nao-reconhecido');
+        }
+        statusFace.innerHTML = '<i class="fas fa-user-slash text-warning me-1"></i>Posicione seu rosto dentro da moldura para liberar os botões';
+        statusFace.style.color = '#ffc107';
         return;
       }
 
-      // Compara descriptor com o do funcionário
-      let confianca = 92;
+      // ROSTO DETECTADO: Compara biometria neural com o cadastro do funcionário
       if (funcionarioAtual && funcionarioAtual.faceDescriptor) {
         const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
-        confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (distancia - 0.20) / 0.45) * 100)));
-      }
 
-      if (moldura) moldura.classList.add('reconhecido');
-      statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Enquadrado!</strong> (${confianca}% de precisão) — Toque no botão`;
-      statusFace.style.color = '#28a745';
+        // Limiar seguro de correspondência (<= 0.58)
+        if (distancia <= 0.58) {
+          // ROSTO RECONHECIDO COM SUCESSO!
+          const confianca = Math.round(Math.max(68, Math.min(99.9, (1 - (distancia - 0.20) / 0.40) * 100)));
+          if (moldura) {
+            moldura.classList.remove('nao-reconhecido');
+            moldura.classList.add('reconhecido');
+          }
+          statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Reconhecido!</strong> (${confianca}%) — Toque no botão desejado`;
+          statusFace.style.color = '#28a745';
+          liberarBotoes(true);
+        } else {
+          // ROSTO DETECTADO, MAS NÃO É O DO COLABORADOR DO CPF!
+          liberarBotoes(false);
+          if (moldura) {
+            moldura.classList.remove('reconhecido');
+            moldura.classList.add('nao-reconhecido');
+          }
+          statusFace.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i><strong>Rosto não reconhecido</strong> para ${funcionarioAtual.nome}`;
+          statusFace.style.color = '#dc3545';
+        }
+      } else {
+        // Se ainda não tiver biometria prévia gravada
+        if (moldura) moldura.classList.add('reconhecido');
+        statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i>Rosto Enquadrado! Toque no botão desejado`;
+        statusFace.style.color = '#28a745';
+        liberarBotoes(true);
+      }
 
     } catch (e) {
       console.warn('Loop facial:', e);
@@ -310,11 +338,11 @@ function iniciarLoop() {
 }
 
 function liberarBotoes(liberar) {
+  faceReconhecida = !!liberar;
   ['btn-entrada','btn-almoco-saida','btn-almoco-retorno','btn-saida'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    // Botões sempre liberados para o colaborador não ficar travado!
-    btn.disabled = processando;
+    btn.disabled = !liberar || processando;
   });
 }
 
@@ -384,6 +412,12 @@ function fecharOverlay() {
 async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
 
+  // Trava de segurança: impede bater sem rosto reconhecido
+  if (!faceReconhecida) {
+    abrirOverlayErro("Acesso Negado: Rosto não identificado. Posicione seu rosto na moldura da câmera para registrar o ponto.");
+    return;
+  }
+
   processando = true;
   liberarBotoes(false);
 
@@ -395,7 +429,7 @@ async function registrarPonto(tipo) {
   let fotoSnapshot = null;
 
   try {
-    // 1. Tira foto da câmera
+    // 1. Tira foto da câmera e faz a validação facial rigorosa
     if (video && video.videoWidth) {
       const capCanvas = document.createElement('canvas');
       capCanvas.width = 320;
@@ -404,18 +438,28 @@ async function registrarPonto(tipo) {
       capCtx.drawImage(video, 0, 0, 320, 240);
       fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.7);
 
-      // Leitura biométrica no instante da batida
-      try {
-        const det = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 }))
-          .withFaceLandmarks()
-          .withFaceDescriptor();
+      // Verificação biométrica instantânea no momento da batida
+      const det = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
 
-        if (det && funcionarioAtual.faceDescriptor) {
-          const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
-          confianca = Math.round(Math.max(65, Math.min(99.9, (1 - (d - 0.20) / 0.45) * 100)));
+      if (!det) {
+        abrirOverlayErro("Rosto não detectado no momento do clique! Olhe diretamente para a câmera.");
+        return;
+      }
+
+      if (funcionarioAtual.faceDescriptor) {
+        const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
+        if (d > 0.58) {
+          abrirOverlayErro(`Biometria não confirmada! O rosto na câmera não é o do colaborador ${funcionarioAtual.nome}.`);
+          return;
         }
-      } catch (_) {}
+        confianca = Math.round(Math.max(68, Math.min(99.9, (1 - (d - 0.20) / 0.40) * 100)));
+      }
+    } else {
+      abrirOverlayErro("Câmera indisponível. É obrigatório o reconhecimento facial para bater o ponto.");
+      return;
     }
 
     const agora = firebase.firestore.Timestamp.now();

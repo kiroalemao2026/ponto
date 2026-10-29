@@ -202,6 +202,10 @@ html, body {
   border: 3.5px solid #28a745;
   box-shadow: 0 0 30px rgba(40, 167, 69, 0.7), 0 0 0 9999px rgba(0, 0, 0, 0.25);
 }
+.moldura-oval.nao-reconhecido {
+  border: 3.5px solid #dc3545;
+  box-shadow: 0 0 30px rgba(220, 53, 69, 0.7), 0 0 0 9999px rgba(0, 0, 0, 0.35);
+}
 .camera-status {
   position: absolute; bottom: .5rem; left: 50%;
   transform: translateX(-50%);
