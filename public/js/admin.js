@@ -560,7 +560,20 @@ function exportarCSV() {
   link.click();
 }
 
-// ─── Espelho de Ponto ─────────────────────────────────
+// ─── Espelho de Ponto & Horas Extras ───────────────────
+function formatarHM(min, mostrarSinal = false) {
+  if (min === 0) return '0h 00m';
+  const sinal = min < 0 ? '-' : (mostrarSinal ? '+' : '');
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sinal}${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+function imprimirFolhaA4() {
+  window.print();
+}
+
 async function carregarOpcoesRelatorio() {
   const select = document.getElementById('select-relatorio-func');
   const inputMes = document.getElementById('select-relatorio-mes');
@@ -593,6 +606,7 @@ async function carregarOpcoesRelatorio() {
 async function gerarEspelho() {
   const selectFunc = document.getElementById('select-relatorio-func');
   const inputMes = document.getElementById('select-relatorio-mes');
+  const selectJornada = document.getElementById('select-relatorio-jornada');
   const tbody = document.getElementById('tabela-espelho-corpo');
 
   if (!inputMes.value) {
@@ -602,24 +616,53 @@ async function gerarEspelho() {
 
   const cpf = selectFunc ? selectFunc.value : '';
   const mesAno = inputMes ? inputMes.value : '';
+  const jornadaTipo = selectJornada ? selectJornada.value : '8h_seg_sex';
 
   if (!cpf || !mesAno) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Selecione um funcionário e mês acima.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Selecione um funcionário e mês acima.</td></tr>';
     return;
   }
 
   const [ano, mes] = mesAno.split('-').map(Number);
   const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
   const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
+  const diasMes = dataFim.getDate();
 
   const cleanCpf = cpf.replace(/\D/g, '');
   const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
-  const tituloEl = document.getElementById('titulo-espelho');
-  if (tituloEl) {
-    tituloEl.textContent = `Folha de Ponto - ${func ? func.nome : 'Colaborador'} (${String(mes).padStart(2, '0')}/${ano})`;
-  }
+  const nomeFunc = func ? func.nome : 'Colaborador';
 
-  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Calculando espelho...</td></tr>';
+  // Atualiza cabeçalho oficial do espelho (visível na tela e na impressão A4)
+  const elPeriodo = document.getElementById('folha-periodo-str');
+  if (elPeriodo) {
+    elPeriodo.textContent = `01/${String(mes).padStart(2, '0')}/${ano} a ${String(diasMes).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+  }
+  const elEmissao = document.getElementById('folha-data-emissao');
+  if (elEmissao) {
+    const agora = new Date();
+    elEmissao.textContent = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  }
+  const elFuncNome = document.getElementById('folha-func-nome');
+  if (elFuncNome) elFuncNome.textContent = nomeFunc;
+  const elFuncCpf = document.getElementById('folha-func-cpf');
+  if (elFuncCpf) elFuncCpf.textContent = formatarCPF(cleanCpf);
+  const elFuncCargo = document.getElementById('folha-func-cargo');
+  if (elFuncCargo) elFuncCargo.textContent = func?.cargo || 'Não informado';
+  const elFuncDep = document.getElementById('folha-func-dep');
+  if (elFuncDep) elFuncDep.textContent = func?.departamento || 'Geral';
+  const elFuncJornada = document.getElementById('folha-func-jornada');
+  if (elFuncJornada) {
+    const rotulos = {
+      '8h_seg_sex': '8 horas diárias (Seg a Sex - 40h/sem)',
+      '8h_seg_sex_4h_sab': '8h Seg-Sex + 4h Sáb (44h/sem CLT)',
+      '6h_diarias': '6 horas diárias (Seg a Sex - 30h/sem)'
+    };
+    elFuncJornada.textContent = rotulos[jornadaTipo] || '8 horas diárias';
+  }
+  const elAssinaturaFunc = document.getElementById('assinatura-nome-func');
+  if (elAssinaturaFunc) elAssinaturaFunc.textContent = nomeFunc;
+
+  tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Calculando espelho e horas extras...</td></tr>';
 
   try {
     const snap = await db.collection('registros').get();
@@ -633,15 +676,30 @@ async function gerarEspelho() {
       return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
     });
 
-    const diasMes = dataFim.getDate();
     let linhasHtml = '';
-    let totalMinutosMes = 0;
+    let totalMinutosTrabalhados = 0;
+    let totalMinutosPrevistos = 0;
+    let totalMinutosExtras = 0;
+    let totalMinutosAtrasos = 0;
     let diasTrabalhados = 0;
 
     for (let dia = 1; dia <= diasMes; dia++) {
       const dataDia = new Date(ano, mes - 1, dia);
       const diaFormatado = String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0');
-      const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][dataDia.getDay()];
+      const diaSemana = dataDia.getDay(); // 0 = Dom, 6 = Sáb
+      const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][diaSemana];
+      const isFimDeSemana = diaSemana === 0 || diaSemana === 6;
+
+      // Carga horária prevista do dia em minutos
+      let minutosPrevistos = 0;
+      if (jornadaTipo === '8h_seg_sex') {
+        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : 0;
+      } else if (jornadaTipo === '8h_seg_sex_4h_sab') {
+        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : (diaSemana === 6 ? 240 : 0);
+      } else if (jornadaTipo === '6h_diarias') {
+        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 360 : 0;
+      }
+      totalMinutosPrevistos += minutosPrevistos;
 
       const regsDia = registros.filter(r => {
         const dt = extrairData(r.timestamp);
@@ -662,61 +720,126 @@ async function gerarEspelho() {
       let minutosDia = 0;
       const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
 
-      if (regEntrada && regAlmocoSaida) {
-        minutosDia += Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000));
-      }
-      if (regAlmocoRetorno && regSaida) {
-        minutosDia += Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
-      } else if (regEntrada && regSaida && !regAlmocoSaida && !regAlmocoRetorno) {
-        minutosDia += Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
+      if (regEntrada && regSaida) {
+        if (regAlmocoSaida && regAlmocoRetorno) {
+          minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
+                       Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
+        } else {
+          minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
+        }
+      } else if (regEntrada && regAlmocoSaida && !regSaida) {
+        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000));
       }
 
-      if (regsDia.length > 0) diasTrabalhados++;
-      totalMinutosMes += minutosDia;
+      // Cálculo de Horas Extras e Atrasos / Faltas
+      let extrasDia = 0;
+      let atrasoDia = 0;
 
-      let horasDiaStr = '-';
+      if (regsDia.length > 0) {
+        diasTrabalhados++;
+        totalMinutosTrabalhados += minutosDia;
+
+        if (minutosPrevistos === 0) {
+          // Trabalho em dia de descanso (Folga/DSR) -> 100% Horas Extras
+          extrasDia = minutosDia;
+        } else {
+          if (minutosDia > minutosPrevistos) {
+            extrasDia = minutosDia - minutosPrevistos;
+          } else if (minutosDia < minutosPrevistos && regSaida) {
+            atrasoDia = minutosPrevistos - minutosDia;
+          }
+        }
+      }
+
+      totalMinutosExtras += extrasDia;
+      totalMinutosAtrasos += atrasoDia;
+
+      // Formatação para exibição
+      let totalTrabStr = '<span class="text-muted">-</span>';
       if (minutosDia > 0) {
-        const h = Math.floor(minutosDia / 60);
-        const m = minutosDia % 60;
-        horasDiaStr = `<span class="badge bg-success">${h}h ${String(m).padStart(2,'0')}m</span>`;
+        totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
       } else if (regsDia.length > 0) {
-        horasDiaStr = `<span class="badge bg-info">Em andamento</span>`;
+        totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
       }
 
-      const isFimDeSemana = dataDia.getDay() === 0 || dataDia.getDay() === 6;
+      const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="text-muted">Folga</span>';
+      const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="text-muted">-</span>';
+      
+      let saldoDiaStr = '<span class="text-muted">-</span>';
+      if (extrasDia > 0) {
+        saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
+      } else if (atrasoDia > 0) {
+        saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
+      } else if (minutosDia > 0) {
+        saldoDiaStr = `<span class="text-muted">0h 00m</span>`;
+      }
 
       linhasHtml += `
-        <tr class="${isFimDeSemana ? 'opacity-75' : ''}">
+        <tr class="${isFimDeSemana ? 'fim-de-semana opacity-75' : ''}">
           <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span></td>
           <td><span class="${entrada !== '--:--' ? 'text-success fw-bold' : 'text-muted'}">${entrada}</span></td>
           <td><span class="${almocoSaida !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaida}</span></td>
           <td><span class="${almocoRetorno !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetorno}</span></td>
           <td><span class="${saida !== '--:--' ? 'text-danger fw-bold' : 'text-muted'}">${saida}</span></td>
-          <td>${horasDiaStr}</td>
+          <td>${totalTrabStr}</td>
+          <td><span class="small">${cargaStr}</span></td>
+          <td>${extrasStr}</td>
+          <td>${saldoDiaStr}</td>
         </tr>
       `;
     }
 
     tbody.innerHTML = linhasHtml;
 
-    // Atualiza cards de resumo
-    const totalH = Math.floor(totalMinutosMes / 60);
-    const totalM = totalMinutosMes % 60;
+    // Atualiza cards de resumo superiores na tela
     const elTotalHoras = document.getElementById('total-horas-mes');
-    if (elTotalHoras) elTotalHoras.textContent = `${totalH}h ${String(totalM).padStart(2,'0')}m`;
+    if (elTotalHoras) elTotalHoras.textContent = formatarHM(totalMinutosTrabalhados);
 
-    const elTotalDias = document.getElementById('total-dias-mes');
-    if (elTotalDias) elTotalDias.textContent = `${diasTrabalhados} dia${diasTrabalhados === 1 ? '' : 's'}`;
+    const elCargaPrevista = document.getElementById('total-carga-prevista-mes');
+    if (elCargaPrevista) elCargaPrevista.textContent = formatarHM(totalMinutosPrevistos);
 
-    const mediaMin = diasTrabalhados > 0 ? Math.round(totalMinutosMes / diasTrabalhados) : 0;
-    const mediaH = Math.floor(mediaMin / 60);
-    const mediaM = mediaMin % 60;
-    const elMedia = document.getElementById('media-horas-dia');
-    if (elMedia) elMedia.textContent = `${mediaH}h ${String(mediaM).padStart(2,'0')}m`;
+    const elHorasExtras = document.getElementById('total-horas-extras-mes');
+    if (elHorasExtras) elHorasExtras.textContent = `+${formatarHM(totalMinutosExtras)}`;
+
+    const elAtrasos = document.getElementById('total-atrasos-mes');
+    if (elAtrasos) elAtrasos.textContent = `-${formatarHM(totalMinutosAtrasos)}`;
+
+    const saldoTotalMinutos = totalMinutosExtras - totalMinutosAtrasos;
+    const elSaldoHoras = document.getElementById('saldo-horas-mes');
+    if (elSaldoHoras) {
+      if (saldoTotalMinutos >= 0) {
+        elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-success';
+        elSaldoHoras.textContent = `+${formatarHM(saldoTotalMinutos)}`;
+      } else {
+        elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-danger';
+        elSaldoHoras.textContent = `-${formatarHM(Math.abs(saldoTotalMinutos))}`;
+      }
+    }
+
+    // Atualiza resumo no rodapé da folha (tanto na tela quanto na impressão A4)
+    const elResumoTrab = document.getElementById('resumo-folha-trabalhadas');
+    if (elResumoTrab) elResumoTrab.textContent = formatarHM(totalMinutosTrabalhados);
+
+    const elResumoPrev = document.getElementById('resumo-folha-previstas');
+    if (elResumoPrev) elResumoPrev.textContent = formatarHM(totalMinutosPrevistos);
+
+    const elResumoExtras = document.getElementById('resumo-folha-extras');
+    if (elResumoExtras) elResumoExtras.textContent = `+${formatarHM(totalMinutosExtras)}`;
+
+    const elResumoSaldo = document.getElementById('resumo-folha-saldo');
+    if (elResumoSaldo) {
+      if (saldoTotalMinutos >= 0) {
+        elResumoSaldo.className = 'fs-6 text-success fw-bold';
+        elResumoSaldo.textContent = `+${formatarHM(saldoTotalMinutos)}`;
+      } else {
+        elResumoSaldo.className = 'fs-6 text-danger fw-bold';
+        elResumoSaldo.textContent = `-${formatarHM(Math.abs(saldoTotalMinutos))}`;
+      }
+    }
 
   } catch (err) {
     console.error('Erro ao gerar espelho:', err);
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-danger">Erro ao calcular: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger">Erro ao calcular: ${err.message}</td></tr>`;
   }
 }
 

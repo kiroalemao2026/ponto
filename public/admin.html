@@ -206,31 +206,39 @@
 
     <!-- ── ABA 4: ESPELHO / RELATÓRIO ── -->
     <section id="aba-relatorios" class="aba-secao d-none">
-      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2 no-print">
         <div>
-          <h3 class="fw-bold mb-1">Espelho de Ponto</h3>
-          <p class="text-muted mb-0">Controle mensal de horas trabalhadas</p>
+          <h3 class="fw-bold mb-1">Espelho de Ponto Individual</h3>
+          <p class="text-muted mb-0">Controle mensal de frequência, banco de horas e horas extras</p>
         </div>
         <div class="d-flex gap-2">
-          <button class="btn btn-outline-success btn-sm" onclick="window.print()">
-            <i class="fas fa-print me-1"></i> Imprimir / PDF
+          <button class="btn btn-success" onclick="imprimirFolhaA4()">
+            <i class="fas fa-print me-1"></i> Imprimir Folha A4 / Salvar PDF
           </button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="gerarEspelho()">
+          <button class="btn btn-outline-secondary" onclick="gerarEspelho()">
             <i class="fas fa-sync-alt me-1"></i> Atualizar
           </button>
         </div>
       </div>
 
       <div class="card-dark p-4">
-        <!-- Barra de Seleção Superior Integrada -->
-        <div class="row g-3 mb-4 p-3 bg-secondary bg-opacity-25 rounded-3 align-items-end">
-          <div class="col-md-6">
+        <!-- Barra de Seleção Superior Integrada (Oculta na Impressão) -->
+        <div class="barra-filtro-espelho row g-3 mb-4 p-3 bg-secondary bg-opacity-25 rounded-3 align-items-end no-print">
+          <div class="col-md-4">
             <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-user me-1"></i> Colaborador:</label>
             <select id="select-relatorio-func" class="form-select form-select-lg" onchange="gerarEspelho()"></select>
           </div>
-          <div class="col-md-4">
-            <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-calendar-alt me-1"></i> Mês / Ano de Referência:</label>
+          <div class="col-md-3">
+            <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-calendar-alt me-1"></i> Mês / Ano:</label>
             <input type="month" id="select-relatorio-mes" class="form-control form-control-lg" onchange="gerarEspelho()">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-bold text-accent mb-1"><i class="fas fa-business-time me-1"></i> Carga Horária Diária:</label>
+            <select id="select-relatorio-jornada" class="form-select form-select-lg" onchange="gerarEspelho()">
+              <option value="8h_seg_sex">8h/dia (Seg a Sex - 40h/sem)</option>
+              <option value="8h_seg_sex_4h_sab">8h Seg-Sex + 4h Sáb (44h/sem CLT)</option>
+              <option value="6h_diarias">6h/dia (Seg a Sex - 30h/sem)</option>
+            </select>
           </div>
           <div class="col-md-2">
             <button class="btn btn-danger btn-lg w-100" onclick="gerarEspelho()">
@@ -239,45 +247,127 @@
           </div>
         </div>
 
-        <!-- Resumo do Mês -->
-        <div class="row g-3 mb-4" id="resumo-horas-mes">
-          <div class="col-sm-4">
-            <div class="p-3 rounded bg-dark border border-secondary text-center">
-              <span class="text-muted small">Total de Horas no Mês</span>
-              <h4 class="fw-bold text-success mb-0 mt-1" id="total-horas-mes">0h 00m</h4>
+        <!-- Cards de Resumo na Tela (Oculto na impressão) -->
+        <div class="row g-2 mb-4 no-print" id="resumo-horas-mes">
+          <div class="col-sm-2 col-6">
+            <div class="p-2 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Total Trabalhado</span>
+              <h5 class="fw-bold text-light mb-0 mt-1" id="total-horas-mes">0h 00m</h5>
             </div>
           </div>
-          <div class="col-sm-4">
-            <div class="p-3 rounded bg-dark border border-secondary text-center">
-              <span class="text-muted small">Dias Trabalhados</span>
-              <h4 class="fw-bold text-info mb-0 mt-1" id="total-dias-mes">0 dias</h4>
+          <div class="col-sm-2 col-6">
+            <div class="p-2 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Carga Prevista</span>
+              <h5 class="fw-bold text-muted mb-0 mt-1" id="total-carga-prevista-mes">0h 00m</h5>
             </div>
           </div>
-          <div class="col-sm-4">
-            <div class="p-3 rounded bg-dark border border-secondary text-center">
-              <span class="text-muted small">Média Diária</span>
-              <h4 class="fw-bold text-light mb-0 mt-1" id="media-horas-dia">0h 00m</h4>
+          <div class="col-sm-3 col-6">
+            <div class="p-2 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Horas Extras (+)</span>
+              <h5 class="fw-bold text-success mb-0 mt-1" id="total-horas-extras-mes">+0h 00m</h5>
+            </div>
+          </div>
+          <div class="col-sm-3 col-6">
+            <div class="p-2 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Atrasos / Faltas (-)</span>
+              <h5 class="fw-bold text-danger mb-0 mt-1" id="total-atrasos-mes">-0h 00m</h5>
+            </div>
+          </div>
+          <div class="col-sm-2 col-12">
+            <div class="p-2 rounded bg-dark border border-secondary text-center">
+              <span class="text-muted small">Saldo do Mês</span>
+              <h5 class="fw-bold mb-0 mt-1" id="saldo-horas-mes">0h 00m</h5>
             </div>
           </div>
         </div>
 
-        <h5 class="fw-bold mb-3" id="titulo-espelho">Folha de Ponto Detalhada</h5>
-        <div class="table-responsive">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Dia</th>
-                <th>Entrada</th>
-                <th>Saída Almoço</th>
-                <th>Retorno Almoço</th>
-                <th>Saída</th>
-                <th>Total Trabalhado</th>
-              </tr>
-            </thead>
-            <tbody id="tabela-espelho-corpo">
-              <tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando espelho de ponto...</td></tr>
-            </tbody>
-          </table>
+        <!-- DOCUMENTO OFICIAL A4: CABEÇALHO + TABELA + RESUMO + ASSINATURA -->
+        <div id="folha-impressao-a4">
+          <!-- Cabeçalho Oficial do Documento -->
+          <div class="cabecalho-folha-oficial mb-2 p-2 border border-secondary rounded bg-dark">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <h5 class="fw-bold mb-0 text-light text-uppercase">Espelho de Ponto Individual de Trabalho</h5>
+                <span class="text-accent small fw-bold"><i class="fas fa-clock me-1"></i> Mobilittà — Sistema de Ponto Eletrônico</span>
+              </div>
+              <div class="text-end small text-muted">
+                <div>Período: <strong class="text-light" id="folha-periodo-str">--</strong></div>
+                <div>Emissão: <strong class="text-light" id="folha-data-emissao">--</strong></div>
+              </div>
+            </div>
+            <div class="border-top border-secondary my-1 pt-1 row g-2 small text-light">
+              <div class="col-4">Colaborador: <strong id="folha-func-nome">--</strong></div>
+              <div class="col-4">CPF: <strong id="folha-func-cpf">--</strong></div>
+              <div class="col-4">Cargo: <strong id="folha-func-cargo">--</strong></div>
+              <div class="col-4">Departamento: <strong id="folha-func-dep">--</strong></div>
+              <div class="col-8">Regime / Carga: <strong id="folha-func-jornada">--</strong></div>
+            </div>
+          </div>
+
+          <!-- Tabela Detalhada com Horas Extras e Saldos -->
+          <div class="table-responsive">
+            <table class="admin-table tabela-folha-a4">
+              <thead>
+                <tr>
+                  <th style="width: 13%;">Dia</th>
+                  <th style="width: 10%;">Entrada</th>
+                  <th style="width: 11%;">Saída Almoço</th>
+                  <th style="width: 11%;">Ret. Almoço</th>
+                  <th style="width: 10%;">Saída</th>
+                  <th style="width: 11%;">Total Trab.</th>
+                  <th style="width: 10%;">Carga</th>
+                  <th style="width: 12%;">H. Extras (+)</th>
+                  <th style="width: 12%;">Saldo Dia</th>
+                </tr>
+              </thead>
+              <tbody id="tabela-espelho-corpo">
+                <tr><td colspan="9" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando espelho de ponto...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Resumo de Fechamento na Própria Folha -->
+          <div class="resumo-fechamento-folha p-2 my-2 border border-secondary rounded bg-dark">
+            <div class="row text-center g-2 small">
+              <div class="col-3">
+                <span class="text-muted small d-block">Total Trabalhado</span>
+                <strong class="fs-6 text-light" id="resumo-folha-trabalhadas">0h 00m</strong>
+              </div>
+              <div class="col-3">
+                <span class="text-muted small d-block">Carga Esperada</span>
+                <strong class="fs-6 text-light" id="resumo-folha-previstas">0h 00m</strong>
+              </div>
+              <div class="col-3">
+                <span class="text-muted small d-block">Horas Extras (+)</span>
+                <strong class="fs-6 text-success" id="resumo-folha-extras">+0h 00m</strong>
+              </div>
+              <div class="col-3">
+                <span class="text-muted small d-block">Saldo do Período</span>
+                <strong class="fs-6" id="resumo-folha-saldo">0h 00m</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Termo de Declaração e Bloco de Assinatura para Conferência -->
+          <div class="bloco-assinaturas mt-3 pt-2 border-top border-secondary">
+            <p class="small text-muted text-center mb-4 fst-italic">
+              "Reconheço a exatidão das anotações constantes neste espelho de ponto referente ao período indicado, concordando com as horas normais, horas extras e saldos apurados."
+            </p>
+            <div class="row text-center g-4 pt-2">
+              <div class="col-6">
+                <div class="linha-assinatura" style="border-top: 1px solid #777; width: 85%; margin: 0 auto; padding-top: 6px;">
+                  <strong class="d-block text-light" id="assinatura-nome-func">Assinatura do Colaborador</strong>
+                  <span class="small text-muted">Data: _____ / _____ / ________</span>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="linha-assinatura" style="border-top: 1px solid #777; width: 85%; margin: 0 auto; padding-top: 6px;">
+                  <strong class="d-block text-light">Assinatura do Empregador / RH</strong>
+                  <span class="small text-muted">Data: _____ / _____ / ________</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
