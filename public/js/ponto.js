@@ -17,6 +17,8 @@ const TIPOS = {
   entrada:         "Entrada",
   almoco_saida:    "Saída para Almoço",
   almoco_retorno:  "Retorno do Almoço",
+  saida_extra:     "Saída Extra",
+  retorno_extra:   "Retorno Extra",
   saida:           "Saída"
 };
 // Limiar de distância euclidiana (menor = mais idêntico. 0.65 é excelente para webcams reais)
@@ -405,7 +407,7 @@ function iniciarLoop() {
 
 function liberarBotoes(liberar) {
   faceReconhecida = !!liberar;
-  ['btn-entrada','btn-almoco-saida','btn-almoco-retorno','btn-saida'].forEach(id => {
+  ['btn-entrada','btn-almoco-saida','btn-almoco-retorno','btn-saida','btn-saida-extra','btn-retorno-extra'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.disabled = !liberar || processando;
@@ -542,10 +544,17 @@ async function registrarPonto(tipo) {
     const jaRegistrou = snap.docs.find(doc => {
       const d = doc.data();
       const dt = d.timestamp?.toDate ? d.timestamp.toDate().getTime() : 0;
+      if (tipo === 'saida_extra' || tipo === 'retorno_extra') {
+        return d.tipo === tipo && (Date.now() - dt) < 120000;
+      }
       return d.tipo === tipo && dt >= hojeMs;
     });
 
     if (jaRegistrou) {
+      if (tipo === 'saida_extra' || tipo === 'retorno_extra') {
+        abrirOverlayErro(`${funcionarioAtual.nome} acabou de registrar "${TIPOS[tipo]}". Aguarde alguns instantes.`);
+        return;
+      }
       const horaExist = jaRegistrou.data().timestamp?.toDate ? jaRegistrou.data().timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
       abrirOverlayErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
       return;
@@ -655,6 +664,8 @@ async function carregarFeed() {
       entrada:         'fas fa-sign-in-alt text-success',
       almoco_saida:    'fas fa-utensils text-warning',
       almoco_retorno:  'fas fa-undo text-info',
+      saida_extra:     'fas fa-door-open text-warning',
+      retorno_extra:   'fas fa-walking text-info',
       saida:           'fas fa-sign-out-alt text-danger'
     };
 

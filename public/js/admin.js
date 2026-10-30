@@ -16,6 +16,8 @@ const TIPOS_LABEL = {
   entrada: "Entrada",
   almoco_saida: "Saída Almoço",
   almoco_retorno: "Retorno Almoço",
+  saida_extra: "Saída Extra",
+  retorno_extra: "Retorno Extra",
   saida: "Saída"
 };
 
@@ -793,6 +795,8 @@ async function gerarEspelho() {
       const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
       const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
       const regSaida = regsDia.find(r => r.tipo === 'saida');
+      const regsSaidaExtra = regsDia.filter(r => r.tipo === 'saida_extra');
+      const regsRetornoExtra = regsDia.filter(r => r.tipo === 'retorno_extra');
 
       const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
       const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
@@ -803,6 +807,20 @@ async function gerarEspelho() {
       let minutosDia = 0;
       const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
 
+      // Desconto de intervalos de saídas extras
+      let minutosExtrasFora = 0;
+      let infoExtraTexto = '';
+      regsSaidaExtra.forEach((se, idx) => {
+        const re = regsRetornoExtra[idx];
+        const hSe = extrairData(se.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '';
+        const hRe = re ? extrairData(re.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : 'em aberto';
+        if (re) {
+          const fora = Math.max(0, Math.round((getMs(re) - getMs(se)) / 60000));
+          minutosExtrasFora += fora;
+        }
+        infoExtraTexto += `${infoExtraTexto ? ', ' : ''}${hSe} às ${hRe}`;
+      });
+
       if (regEntrada && regSaida) {
         if (regAlmocoSaida && regAlmocoRetorno) {
           minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
@@ -810,8 +828,10 @@ async function gerarEspelho() {
         } else {
           minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
         }
+        // Desconta tempo ausente em saídas extras
+        minutosDia = Math.max(0, minutosDia - minutosExtrasFora);
       } else if (regEntrada && regAlmocoSaida && !regSaida) {
-        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000));
+        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
       }
 
       // Cálculo de Horas Extras e Atrasos / Faltas
@@ -857,9 +877,13 @@ async function gerarEspelho() {
         saldoDiaStr = `<span class="text-muted">0h 00m</span>`;
       }
 
+      const extraTag = infoExtraTexto 
+        ? `<div class="small text-truncate no-print" style="font-size:0.68rem;color:#a855f7;"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
+        : '';
+
       linhasHtml += `
         <tr class="${isFimDeSemana ? 'fim-de-semana opacity-75' : ''}">
-          <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span></td>
+          <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span>${extraTag}</td>
           <td><span class="${entrada !== '--:--' ? 'text-success fw-bold' : 'text-muted'}">${entrada}</span></td>
           <td><span class="${almocoSaida !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaida}</span></td>
           <td><span class="${almocoRetorno !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetorno}</span></td>

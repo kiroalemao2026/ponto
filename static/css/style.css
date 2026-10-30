@@ -274,6 +274,8 @@ html, body {
 .btn-entrada       { background: #10b981; color: #fff; }
 .btn-almoco-saida  { background: #f59e0b; color: #000; }
 .btn-almoco-retorno{ background: #0ea5e9; color: #fff; }
+.btn-saida-extra   { background: #8b5cf6; color: #fff; }
+.btn-retorno-extra { background: #06b6d4; color: #fff; }
 .btn-saida         { background: #ef4444; color: #fff; }
 
 /* ─── Resultado ──────────────────────────────────────── */
@@ -370,6 +372,8 @@ html, body {
 .badge-entrada        { background: rgba(16,185,129,.15); color: #10b981; }
 .badge-almoco_saida   { background: rgba(245,158,11,.15); color: #f59e0b; }
 .badge-almoco_retorno { background: rgba(14,165,233,.15); color: #0ea5e9; }
+.badge-saida_extra    { background: rgba(139,92,246,.15); color: #a855f7; }
+.badge-retorno_extra  { background: rgba(6,182,212,.15); color: #06b6d4; }
 .badge-saida          { background: rgba(239,68,68,.15); color: #ef4444; }
 
 /* ─── Modal câmera admin ─────────────────────────────── */
