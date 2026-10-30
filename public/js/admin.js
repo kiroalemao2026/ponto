@@ -199,7 +199,7 @@ async function carregarDadosGerais() {
 
         const fotoTag = fotoPerfil 
           ? `<img src="${fotoPerfil}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);cursor:pointer;" onclick="verFotoAmpliada('${fotoPerfil}', '${colab.nome}')">`
-          : `<div style="width:48px;height:48px;border-radius:50%;background:#2a2f3a;display:flex;align-items:center;justify-content:center;color:#e94560;font-weight:bold;font-size:1.2rem;">${colab.nome.charAt(0)}</div>`;
+          : `<div style="width:48px;height:48px;border-radius:50%;background:#222;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:bold;font-size:1.2rem;">${colab.nome.charAt(0)}</div>`;
 
         const linhasPontos = regs.map(reg => {
           const dt = extrairData(reg.timestamp);
@@ -234,10 +234,10 @@ async function carregarDadosGerais() {
 
               <div class="d-flex align-items-center gap-3">
                 <div class="text-end">
-                  <span class="badge bg-danger fs-6">${regs.length} batida${regs.length === 1 ? '' : 's'}</span>
+                  <span class="badge fs-6" style="background:var(--accent);color:#fff;font-weight:700;">${regs.length} batida${regs.length === 1 ? '' : 's'}</span>
                   <div class="small text-muted mt-1">Último: <span class="badge-tipo badge-${ultimo.tipo}">${TIPOS_LABEL[ultimo.tipo] || ultimo.tipo} às ${horaUltimo}</span></div>
                 </div>
-                <div class="p-2 rounded-circle bg-secondary bg-opacity-25 text-accent d-flex align-items-center justify-content-center" style="width:36px;height:36px;">
+                <div class="p-2 rounded-circle border border-accent border-opacity-50 text-accent d-flex align-items-center justify-content-center" style="width:36px;height:36px;background:rgba(255,107,0,0.12);">
                   <i class="fas fa-chevron-down fs-6" id="icone-dash-${colab.cpf}"></i>
                 </div>
               </div>
@@ -332,7 +332,7 @@ function renderizarTabelaFuncionarios(lista) {
         <td>
           ${foto 
             ? `<img src="${foto}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="verFotoAmpliada('${foto}', '${f.nome}')">`
-            : '<div style="width:40px;height:40px;border-radius:50%;background:#30363d;display:flex;align-items:center;justify-content:center;"><i class="fas fa-user text-muted"></i></div>'}
+            : '<div style="width:40px;height:40px;border-radius:50%;background:#222;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><i class="fas fa-user text-muted"></i></div>'}
         </td>
         <td><strong class="text-light">${f.nome}</strong></td>
         <td><code>${formatarCPF(f.cpf || '')}</code></td>
