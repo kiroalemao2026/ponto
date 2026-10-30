@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cls
 echo =====================================================
-echo      SISTEMA DE PONTO ELETRONICO
+echo       🕐 SISTEMA DE PONTO ELETRÔNICO MOBILITTÀ
 echo =====================================================
 echo.
 
@@ -15,26 +15,21 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [1/2] Instalando dependencias Python...
-pip install -r requirements.txt --quiet
-if %errorlevel% neq 0 (
-    echo.
-    echo [AVISO] Erro ao instalar algumas dependencias.
-    echo Se o face_recognition falhar, instale o Visual C++ Build Tools primeiro:
-    echo https://visualstudio.microsoft.com/visual-cpp-build-tools/
-    echo.
-)
+cd /d "%~dp0"
 
-echo.
-echo [2/2] Iniciando servidor...
+echo [1/1] Iniciando servidor com suporte a camera segura (HTTPS)...
 echo.
 echo =====================================================
-echo  Acesse em: http://localhost:8000
-echo  Admin:     http://localhost:8000/admin
-echo  Login:     admin / admin123
+echo   💻 No Computador:    https://localhost:8000
+echo   📱 No Celular Wi-Fi: https://192.168.100.10:8000
+echo   ⚙️ Painel Admin:     https://localhost:8000/admin
+echo   ☁️ Online (Render):  https://ponto-icaa.onrender.com
 echo =====================================================
 echo.
-echo Pressione Ctrl+C para parar o servidor.
+echo DICA: Se o navegador avisar "Sua conexao nao e privada",
+echo clique em "Avancado" e depois em "Continuar para localhost".
+echo.
+echo Pressione Ctrl+C para parar o servidor a qualquer momento.
 echo.
 
 python main.py
