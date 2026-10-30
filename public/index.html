@@ -6,7 +6,7 @@
   <title>Sistema de Ponto</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="/css/style.css?v=20261029_extra">
+  <link rel="stylesheet" href="/css/style.css?v=20261029_clean">
 </head>
 <body>
 
@@ -164,39 +164,20 @@
         </div>
       </div>
 
-      <!-- Lateral -->
-      <div class="lateral-col">
-        <!-- Card Processando -->
-        <div id="card-processando" class="card-dark p-3 text-center mb-3 d-none border-info">
-          <div class="spinner-border text-info mb-2" role="status"></div>
-          <h5 class="text-light fw-bold mb-1">Registrando ponto...</h5>
-          <p class="text-muted small mb-0">Capturando foto e salvando no Firebase</p>
+      <!-- Lateral (Oculta na interface para tela focada e limpa) -->
+      <div class="lateral-col d-none">
+        <div id="card-processando"></div>
+        <div id="card-resultado">
+          <div id="res-icone"></div>
+          <div id="res-nome"></div>
+          <div id="res-cargo"></div>
+          <div id="res-tipo"></div>
+          <div id="res-hora"></div>
+          <div id="res-conf"></div>
+          <div id="res-msg"></div>
+          <div id="res-contador"></div>
+          <span id="segundos-restantes"></span>
         </div>
-
-        <!-- Resultado -->
-        <div id="card-resultado" class="card-resultado mb-3">
-          <div class="d-flex align-items-center gap-3">
-            <div id="res-icone" style="font-size:2rem"></div>
-            <div>
-              <div id="res-nome" style="font-weight:700;font-size:1.1rem"></div>
-              <div id="res-cargo" style="font-size:.85rem;color:var(--text-muted)"></div>
-              <div id="res-tipo" class="mt-1"></div>
-              <div id="res-hora" style="font-size:.8rem;color:var(--text-muted)"></div>
-              <div id="res-conf" style="font-size:.8rem;color:var(--text-muted)"></div>
-            </div>
-          </div>
-          <div id="res-msg" class="mt-2" style="font-size:.9rem"></div>
-
-          <!-- Contador Regressivo de 5 Segundos -->
-          <div id="res-contador" class="mt-3 p-2 rounded bg-dark border border-success text-center d-none">
-            <span class="text-muted small"><i class="fas fa-clock text-success me-1"></i> Retornando para o próximo colaborador em:</span>
-            <div class="fs-4 fw-bold text-success mt-1"><span id="segundos-restantes">5</span> segundos</div>
-          </div>
-        </div>
-
-        <!-- Feed -->
-        <div class="feed-titulo"><i class="fas fa-list-ul me-1"></i>Últimos Registros</div>
-        <div id="feed-lista" style="max-height:400px;overflow-y:auto"></div>
       </div>
 
     </div>

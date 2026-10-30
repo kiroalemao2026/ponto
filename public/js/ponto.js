@@ -112,8 +112,6 @@ async function init() {
   document.getElementById('etapa-cpf').classList.remove('hidden');
   document.getElementById('input-cpf').focus();
   iniciarRelogio();
-  carregarFeed();
-  setInterval(carregarFeed, 30000);
 }
 
 // ─── Etapa 1: Validar CPF ─────────────────────────────
@@ -579,7 +577,6 @@ async function registrarPonto(tipo) {
 
     const horaFormatada = agora.toDate().toLocaleTimeString('pt-BR');
     abrirOverlaySucesso(funcionarioAtual.nome, TIPOS[tipo], horaFormatada, fotoSnapshot || funcionarioAtual.fotoUrl);
-    carregarFeed();
 
   } catch (e) {
     console.error('Erro ao salvar ponto:', e);
