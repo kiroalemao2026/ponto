@@ -27,6 +27,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Desativa cache no navegador para arquivos CSS, JS e HTML
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if (path.endswith(".css") or path.endswith(".js") or path.endswith(".html") or
+        path in ["/", "/admin", "/login", "/admin/"]):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Cria diretórios necessários
 os.makedirs("fotos_funcionarios", exist_ok=True)
 os.makedirs("fotos_registros", exist_ok=True)
