@@ -657,10 +657,41 @@ html, body {
 /* ============================================================
    ESTILOS DE IMPRESSÃO (A4 100% PRETO NÍTIDO / SALVAR PDF)
    ============================================================ */
+
+/* ============================================================
+   ESTILOS DE IMPRESSÃO (A4 100% PRETO NÍTIDO / SALVAR PDF)
+   ============================================================ */
 @media print {
   @page {
     size: A4 portrait;
     margin: 5mm 6mm 5mm 6mm;
+  }
+
+  /* Oculta COMPLETAMENTE a interface do site, menus, barras laterais e outras abas */
+  aside,
+  .admin-sidebar,
+  .sidebar,
+  header,
+  nav,
+  .brand,
+  .top-navbar,
+  .admin-header,
+  .barra-filtro-espelho,
+  .nav-item-link,
+  .modal,
+  .modal-backdrop,
+  .alert,
+  .btn,
+  button,
+  .no-print,
+  .aba-secao:not(#aba-relatorios) {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   body, html {
@@ -670,24 +701,32 @@ html, body {
     print-color-adjust: exact !important;
     height: auto !important;
     overflow: visible !important;
-  }
-
-  .sidebar,
-  .top-navbar,
-  .admin-header,
-  .barra-filtro-espelho,
-  .no-print,
-  .btn,
-  .alert {
-    display: none !important;
-  }
-
-  .main-content {
     margin: 0 !important;
     padding: 0 !important;
     width: 100% !important;
+  }
+
+  /* Remove o flexbox horizontal que posicionava o menu na esquerda */
+  body > div,
+  .d-flex.flex-column.flex-md-row {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto !important;
+  }
+
+  /* Expande o conteúdo principal a 100% da folha */
+  .admin-content,
+  .main-content,
+  main {
+    display: block !important;
+    width: 100% !important;
     max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
+    border: none !important;
   }
 
   .card-dark {
@@ -696,10 +735,12 @@ html, body {
     box-shadow: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    width: 100% !important;
   }
 
   #aba-relatorios {
     display: block !important;
+    width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
   }
