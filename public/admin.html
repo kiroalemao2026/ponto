@@ -34,6 +34,9 @@
       <a href="#" class="nav-item-link" onclick="navegarAba('relatorios', this); return false;">
         <i class="fas fa-file-invoice"></i> Espelho / Relatórios
       </a>
+      <a href="#" class="nav-item-link" onclick="navegarAba('atestados', this); return false;">
+        <i class="fas fa-file-medical"></i> Atestados / Justificativas
+      </a>
       <div class="border-top border-secondary my-3"></div>
       <a href="/Ponto_Eletronico.apk" download class="nav-item-link" style="color: #ff6b00;">
         <i class="fab fa-android"></i> Baixar APK (Celular)
@@ -135,7 +138,13 @@
           <h3 class="fw-bold mb-1">Espelho de Ponto Individual</h3>
           <p class="text-muted mb-0">Controle mensal de frequência, banco de horas e horas extras</p>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-warning" onclick="abrirModalAtestadoParaFuncionario()">
+            <i class="fas fa-file-medical me-1"></i> Lançar Atestado
+          </button>
+          <button class="btn btn-outline-warning" onclick="abrirModalPontoManual()">
+            <i class="fas fa-plus-circle me-1"></i> Inserir Ponto Manual
+          </button>
           <button class="btn btn-success" onclick="imprimirFolhaA4()">
             <i class="fas fa-print me-1"></i> Imprimir Folha A4 / Salvar PDF
           </button>
@@ -240,8 +249,9 @@
                   <th style="width: 10%;">Saída</th>
                   <th style="width: 11%;">Total Trab.</th>
                   <th style="width: 10%;">Carga</th>
-                  <th style="width: 12%;">H. Extras (+)</th>
-                  <th style="width: 12%;">Saldo Dia</th>
+                  <th style="width: 11%;">H. Extras (+)</th>
+                  <th style="width: 10%;">Saldo Dia</th>
+                  <th style="width: 5%;" class="no-print text-center">Ajuste</th>
                 </tr>
               </thead>
               <tbody id="tabela-espelho-corpo">
@@ -274,6 +284,56 @@
       </div>
     </section>
 
+    <!-- ── ABA 4: ATESTADOS E JUSTIFICATIVAS ── -->
+    <section id="aba-atestados" class="aba-secao d-none">
+      <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+          <h3 class="fw-bold mb-1">Atestados e Justificativas</h3>
+          <p class="text-muted mb-0">Controle de atestados médicos, licenças e faltas justificadas com abono automático de horas</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-warning" onclick="abrirModalAtestado()">
+            <i class="fas fa-file-medical me-2"></i>+ Lançar Atestado / Licença
+          </button>
+          <button class="btn btn-outline-warning" onclick="abrirModalPontoManual()">
+            <i class="fas fa-clock me-2"></i>+ Inserir Ponto Manual
+          </button>
+          <button class="btn btn-outline-secondary" onclick="carregarAtestados()">
+            <i class="fas fa-sync-alt me-1"></i> Atualizar
+          </button>
+        </div>
+      </div>
+
+      <div class="card-dark p-4">
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <input type="text" id="filtro-atestado-busca" class="form-control" placeholder="Buscar por colaborador ou motivo..." oninput="filtrarAtestados()">
+          </div>
+          <div class="col-md-6 text-end">
+            <span class="badge border border-warning text-warning px-3 py-2 fs-6" style="background: rgba(245,158,11,0.12);" id="badge-total-atestados">0 atestados</span>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Colaborador</th>
+                <th>Tipo de Justificativa</th>
+                <th>Período</th>
+                <th>Duração</th>
+                <th>Motivo / Descrição / CID</th>
+                <th>Status</th>
+                <th class="text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabela-atestados-corpo">
+              <tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando atestados...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -380,6 +440,212 @@
       <h6 id="modal-foto-legenda" class="mb-3 text-light"></h6>
       <img id="modal-foto-img" src="" alt="Foto" style="max-height:400px;object-fit:contain;border-radius:8px;">
       <button type="button" class="btn btn-secondary btn-sm mt-3" data-bs-dismiss="modal">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: AJUSTAR HORÁRIOS DO DIA ── -->
+<div class="modal fade" id="modal-ajuste-dia" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-user-clock text-accent me-2"></i>Ajustar Horários do Dia</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="form-ajuste-dia" onsubmit="salvarAjusteDia(event)">
+        <div class="modal-body">
+          <div class="p-2 mb-3 rounded bg-dark border border-secondary">
+            <div>Colaborador: <strong class="text-light" id="ajuste-dia-nome">--</strong></div>
+            <div>Data: <strong class="text-accent" id="ajuste-dia-data-label">--</strong></div>
+          </div>
+
+          <input type="hidden" id="ajuste-dia-cpf">
+          <input type="hidden" id="ajuste-dia-data">
+
+          <h6 class="text-light fw-bold mb-2"><i class="fas fa-clock text-accent me-1"></i> Batidas do Dia:</h6>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label small text-success fw-bold mb-1">Entrada</label>
+              <input type="time" id="ajuste-dia-entrada" class="form-control">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-warning fw-bold mb-1">Saída Almoço</label>
+              <input type="time" id="ajuste-dia-almoco-saida" class="form-control">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-info fw-bold mb-1">Retorno Almoço</label>
+              <input type="time" id="ajuste-dia-almoco-retorno" class="form-control">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-danger fw-bold mb-1">Saída</label>
+              <input type="time" id="ajuste-dia-saida" class="form-control">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted fw-bold mb-1" style="color:#a855f7 !important;">Saída Extra</label>
+              <input type="time" id="ajuste-dia-saida-extra" class="form-control">
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted fw-bold mb-1" style="color:#06b6d4 !important;">Retorno Extra</label>
+              <input type="time" id="ajuste-dia-retorno-extra" class="form-control">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Motivo do Ajuste / Esquecimento:</label>
+            <select id="ajuste-dia-motivo" class="form-select">
+              <option value="Esquecimento de registro pelo colaborador">Esquecimento de registro pelo colaborador</option>
+              <option value="Problema técnico / aparelho / biometria">Problema técnico / aparelho / biometria</option>
+              <option value="Trabalho externo / em viagem">Trabalho externo / em viagem</option>
+              <option value="Correção autorizada pela gerência">Correção autorizada pela gerência</option>
+              <option value="Outro motivo justificado">Outro motivo justificado</option>
+            </select>
+          </div>
+
+          <hr class="border-secondary my-3">
+
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="ajuste-dia-check-atestado" onchange="toggleAtestadoNoAjuste(this.checked)">
+            <label class="form-check-label fw-bold text-warning" for="ajuste-dia-check-atestado">
+              <i class="fas fa-file-medical me-1"></i> Lançar Atestado / Justificativa neste dia
+            </label>
+          </div>
+
+          <div id="ajuste-dia-box-atestado" class="p-3 rounded bg-dark border border-warning d-none mb-2">
+            <div class="mb-2">
+              <label class="form-label small">Tipo de Justificativa:</label>
+              <select id="ajuste-dia-atestado-tipo" class="form-select form-select-sm">
+                <option value="Atestado Médico (Abonar Dia)">Atestado Médico (Abonar Dia)</option>
+                <option value="Declaração de Comparecimento / Consulta">Declaração de Comparecimento / Consulta</option>
+                <option value="Falta Justificada (Sem desconto)">Falta Justificada (Sem desconto)</option>
+                <option value="Licença (Gala / Luto / Paternidade)">Licença (Gala / Luto / Paternidade)</option>
+                <option value="Folga Compensatória / Banco">Folga Compensatória / Banco</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label small">Descrição / Médico / CID:</label>
+              <input type="text" id="ajuste-dia-atestado-desc" class="form-control form-control-sm" placeholder="Ex: Dr. Silva CRM 12345 - CID J06">
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="fas fa-save me-1"></i> Salvar Ajustes
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: LANÇAR ATESTADO / JUSTIFICATIVA ── -->
+<div class="modal fade" id="modal-atestado" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-file-medical text-warning me-2"></i>Lançar Atestado / Licença</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="form-novo-atestado" onsubmit="salvarNovoAtestado(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Colaborador:</label>
+            <select id="atestado-func-select" class="form-select" required></select>
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label fw-bold">Data Início:</label>
+              <input type="date" id="atestado-data-inicio" class="form-control" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label fw-bold">Data Fim:</label>
+              <input type="date" id="atestado-data-fim" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Tipo de Documento:</label>
+            <select id="atestado-tipo-select" class="form-select">
+              <option value="Atestado Médico (Abonar Dia)">Atestado Médico (Abonar Dia)</option>
+              <option value="Declaração de Comparecimento / Consulta">Declaração de Comparecimento / Consulta</option>
+              <option value="Falta Justificada (Sem desconto)">Falta Justificada (Sem desconto)</option>
+              <option value="Licença (Gala / Luto / Paternidade)">Licença (Gala / Luto / Paternidade)</option>
+              <option value="Folga Compensatória / Banco">Folga Compensatória / Banco</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Motivo / Médico / CID / Detalhes:</label>
+            <textarea id="atestado-motivo" class="form-control" rows="2" placeholder="Ex: Atestado médico de 2 dias Dr. Roberto CRM 5543 - CID K29.1" required></textarea>
+          </div>
+
+          <div class="alert alert-info py-2 small mb-0">
+            <i class="fas fa-info-circle me-1"></i> Os dias cobertos por este atestado serão automaticamente abonados no Espelho de Ponto, sem gerar faltas ou atrasos.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-warning fw-bold text-dark">
+            <i class="fas fa-check me-1"></i> Registrar Atestado
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: INSERIR PONTO MANUAL ── -->
+<div class="modal fade" id="modal-ponto-manual" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-clock text-accent me-2"></i>Inserir Ponto Manual</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="form-ponto-manual" onsubmit="salvarPontoManualAvulso(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Colaborador:</label>
+            <select id="ponto-manual-func" class="form-select" required></select>
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label fw-bold">Data:</label>
+              <input type="date" id="ponto-manual-data" class="form-control" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label fw-bold">Horário:</label>
+              <input type="time" id="ponto-manual-hora" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Tipo de Batida:</label>
+            <select id="ponto-manual-tipo" class="form-select">
+              <option value="entrada">Entrada</option>
+              <option value="almoco_saida">Saída Almoço</option>
+              <option value="almoco_retorno">Retorno Almoço</option>
+              <option value="saida">Saída</option>
+              <option value="saida_extra">Saída Extra</option>
+              <option value="retorno_extra">Retorno Extra</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">Justificativa / Motivo:</label>
+            <input type="text" id="ponto-manual-motivo" class="form-control" placeholder="Ex: Esqueceu de bater entrada" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="fas fa-save me-1"></i> Inserir Registro
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </div>

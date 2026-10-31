@@ -27,6 +27,10 @@ let listaFuncionariosCache = [];
 let listaRegistrosCache = [];
 let modalFuncInstancia = null;
 let modalFotoInstancia = null;
+let modalAjusteDiaInstancia = null;
+let modalAtestadoInstancia = null;
+let modalPontoManualInstancia = null;
+let listaAtestadosCache = [];
 
 function extrairData(ts) {
   if (!ts) return null;
@@ -51,6 +55,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   modalFuncInstancia = new bootstrap.Modal(document.getElementById('modal-func'));
   modalFotoInstancia = new bootstrap.Modal(document.getElementById('modal-foto'));
+  const elModalAjuste = document.getElementById('modal-ajuste-dia');
+  if (elModalAjuste) modalAjusteDiaInstancia = new bootstrap.Modal(elModalAjuste);
+  const elModalAtestado = document.getElementById('modal-atestado');
+  if (elModalAtestado) modalAtestadoInstancia = new bootstrap.Modal(elModalAtestado);
+  const elModalManual = document.getElementById('modal-ponto-manual');
+  if (elModalManual) modalPontoManualInstancia = new bootstrap.Modal(elModalManual);
 
   // Data atual
   const agora = new Date();
@@ -97,6 +107,7 @@ function navegarAba(aba, el) {
   if (aba === 'dashboard') carregarDadosGerais();
   if (aba === 'funcionarios') carregarFuncionarios();
   if (aba === 'relatorios') carregarOpcoesRelatorio();
+  if (aba === 'atestados') carregarAtestados();
 }
 
 function fazerLogout() {
@@ -211,13 +222,20 @@ async function carregarDadosGerais() {
 
           return `
             <tr>
-              <td class="text-light fw-bold"><i class="fas fa-clock text-accent me-1"></i> ${horaStr} <small class="text-muted">(${dt ? dt.toLocaleDateString('pt-BR') : ''})</small></td>
+              <td class="text-light fw-bold">
+                <i class="fas fa-clock text-accent me-1"></i> ${horaStr} 
+                <small class="text-muted">(${dt ? dt.toLocaleDateString('pt-BR') : ''})</small>
+                ${reg.ajusteManual ? `<span class="badge bg-warning text-dark ms-1" title="${reg.justificativa || 'Ajuste Manual'}"><i class="fas fa-edit me-1"></i>Manual</span>` : ''}
+              </td>
               <td><span class="badge-tipo badge-${reg.tipo}">${TIPOS_LABEL[reg.tipo] || reg.tipo}</span></td>
               <td><span class="text-light"><i class="fas fa-fingerprint text-accent me-1"></i> ${reg.confianca || 92}%</span></td>
               <td>
                 ${fotoReg 
                   ? `<img src="${fotoReg}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;cursor:pointer;border:1px solid #555;" onclick="verFotoAmpliada('${fotoReg}', '${colab.nome} - ${dataHoraStr}')">`
                   : '<span class="text-muted small">Sem foto</span>'}
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-danger p-1" onclick="excluirRegistroPonto('${reg.id}', '${colab.nome}', '${horaStr}', event)" title="Excluir esta batida"><i class="fas fa-trash-alt"></i></button>
               </td>
             </tr>
           `;
@@ -750,15 +768,23 @@ async function gerarEspelho() {
   tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Calculando espelho e horas extras...</td></tr>';
 
   try {
-    const snap = await db.collection('registros').get();
+    const [snapReg, snapAtestados] = await Promise.all([
+      db.collection('registros').get(),
+      db.collection('atestados').get()
+    ]);
 
     const tInicioMs = dataInicio.getTime();
     const tFimMs = dataFim.getTime();
 
-    const registros = snap.docs.map(d => d.data()).filter(r => {
+    const registros = snapReg.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
       const rCpf = (r.cpf || '').replace(/\D/g, '');
       const dt = extrairData(r.timestamp)?.getTime() || 0;
       return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
+    });
+
+    const atestadosFunc = snapAtestados.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => {
+      const aCpf = (a.cpf || '').replace(/\D/g, '');
+      return aCpf === cleanCpf;
     });
 
     let linhasHtml = '';
@@ -834,11 +860,29 @@ async function gerarEspelho() {
         minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
       }
 
+      // Verifica se há atestado neste dia
+      const dataDiaStr = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+      const atestadoDoDia = atestadosFunc.find(a => {
+        const ini = a.dataInicio || '';
+        const fim = a.dataFim || a.dataInicio || '';
+        return dataDiaStr >= ini && dataDiaStr <= fim;
+      });
+
       // Cálculo de Horas Extras e Atrasos / Faltas
       let extrasDia = 0;
       let atrasoDia = 0;
 
-      if (regsDia.length > 0) {
+      if (atestadoDoDia) {
+        // Dia abonado por atestado / justificativa médica -> Não desconta falta ou atraso
+        atrasoDia = 0;
+        if (minutosDia > 0) {
+          diasTrabalhados++;
+          totalMinutosTrabalhados += minutosDia;
+          if (minutosDia > minutosPrevistos) {
+            extrasDia = minutosDia - minutosPrevistos;
+          }
+        }
+      } else if (regsDia.length > 0) {
         diasTrabalhados++;
         totalMinutosTrabalhados += minutosDia;
 
@@ -881,17 +925,36 @@ async function gerarEspelho() {
         ? `<div class="small text-truncate no-print" style="font-size:0.68rem;color:#a855f7;"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
         : '';
 
+      let entradaCol = entrada;
+      let almocoSaidaCol = almocoSaida;
+      let almocoRetornoCol = almocoRetorno;
+      let saidaCol = saida;
+      let atestadoTag = '';
+
+      if (atestadoDoDia) {
+        atestadoTag = `<div class="small text-truncate mt-1" style="font-size:0.68rem;color:#f59e0b;"><i class="fas fa-file-medical me-1"></i>${atestadoDoDia.tipo || 'Atestado'}</div>`;
+        if (minutosDia === 0 && regsDia.length === 0) {
+          totalTrabStr = `<span class="badge border border-warning text-warning" style="background:rgba(245,158,11,0.12);font-size:0.72rem;">Abonado (${cargaStr})</span>`;
+          saldoDiaStr = `<span class="text-warning fw-bold small">Abonado</span>`;
+        }
+      }
+
       linhasHtml += `
         <tr class="${isFimDeSemana ? 'fim-de-semana opacity-75' : ''}">
-          <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span>${extraTag}</td>
-          <td><span class="${entrada !== '--:--' ? 'text-success fw-bold' : 'text-muted'}">${entrada}</span></td>
-          <td><span class="${almocoSaida !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaida}</span></td>
-          <td><span class="${almocoRetorno !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetorno}</span></td>
-          <td><span class="${saida !== '--:--' ? 'text-danger fw-bold' : 'text-muted'}">${saida}</span></td>
+          <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
+          <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'text-muted'}">${entradaCol}</span></td>
+          <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaidaCol}</span></td>
+          <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetornoCol}</span></td>
+          <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'text-muted'}">${saidaCol}</span></td>
           <td>${totalTrabStr}</td>
           <td><span class="small">${cargaStr}</span></td>
           <td>${extrasStr}</td>
           <td>${saldoDiaStr}</td>
+          <td class="no-print text-center">
+            <button class="btn btn-sm btn-outline-warning p-1" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;" onclick="abrirModalAjusteDia('${cleanCpf}', '${dataDiaStr}', event)" title="Ajustar batidas ou atestado deste dia">
+              <i class="fas fa-edit" style="font-size:0.75rem;"></i>
+            </button>
+          </td>
         </tr>
       `;
     }
@@ -948,4 +1011,470 @@ function verFotoAmpliada(src, legenda) {
   document.getElementById('modal-foto-img').src = src;
   document.getElementById('modal-foto-legenda').textContent = legenda;
   modalFotoInstancia.show();
+}
+
+
+// ============================================================
+// ─── GESTÃO DE ATESTADOS E JUSTIFICATIVAS ────────────────────
+// ============================================================
+
+async function carregarAtestados() {
+  const tbody = document.getElementById('tabela-atestados-corpo');
+  if (!tbody || !db) return;
+
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando atestados...</td></tr>';
+
+  try {
+    const snap = await db.collection('atestados').get();
+    listaAtestadosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Ordena do mais recente para o mais antigo
+    listaAtestadosCache.sort((a, b) => {
+      const da = a.dataInicio || '';
+      const dbDate = b.dataInicio || '';
+      return dbDate.localeCompare(da);
+    });
+
+    renderizarTabelaAtestados(listaAtestadosCache);
+  } catch (err) {
+    console.error('Erro ao carregar atestados:', err);
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Erro ao carregar atestados: ${err.message}</td></tr>`;
+  }
+}
+
+function renderizarTabelaAtestados(lista) {
+  const tbody = document.getElementById('tabela-atestados-corpo');
+  const badgeTotal = document.getElementById('badge-total-atestados');
+  if (badgeTotal) badgeTotal.textContent = `${lista.length} atestado${lista.length === 1 ? '' : 's'}`;
+
+  if (!lista || lista.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Nenhum atestado ou justificativa cadastrada ainda.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.map(at => {
+    const dataIni = at.dataInicio ? at.dataInicio.split('-').reverse().join('/') : '--';
+    const dataFim = at.dataFim ? at.dataFim.split('-').reverse().join('/') : dataIni;
+    const periodoStr = dataIni === dataFim ? dataIni : `${dataIni} até ${dataFim}`;
+
+    let diasDuracao = 1;
+    if (at.dataInicio && at.dataFim) {
+      const msDiff = new Date(at.dataFim).getTime() - new Date(at.dataInicio).getTime();
+      diasDuracao = Math.max(1, Math.round(msDiff / (1000 * 60 * 60 * 24)) + 1);
+    }
+
+    return `
+      <tr>
+        <td>
+          <strong class="text-light fs-6">${at.funcionarioNome || 'Colaborador'}</strong>
+          <div class="text-muted small">CPF: ${formatarCPF(at.cpf || '')}</div>
+        </td>
+        <td>
+          <span class="badge border border-warning text-warning" style="background: rgba(245,158,11,0.12);">
+            <i class="fas fa-file-medical me-1"></i>${at.tipo || 'Atestado'}
+          </span>
+        </td>
+        <td><strong class="text-light">${periodoStr}</strong></td>
+        <td><span class="badge bg-secondary">${diasDuracao} dia${diasDuracao === 1 ? '' : 's'}</span></td>
+        <td>
+          <span class="text-light">${at.motivo || '-'}</span>
+        </td>
+        <td>
+          <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Abonado</span>
+        </td>
+        <td class="text-center">
+          <button class="btn btn-outline-danger btn-sm p-1 px-2" onclick="excluirAtestado('${at.id}', '${at.funcionarioNome || ''} - ${periodoStr}')" title="Excluir atestado">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filtrarAtestados() {
+  const busca = (document.getElementById('filtro-atestado-busca')?.value || '').toLowerCase().trim();
+  if (!busca) {
+    renderizarTabelaAtestados(listaAtestadosCache);
+    return;
+  }
+  const filtrados = listaAtestadosCache.filter(at => {
+    const nome = (at.funcionarioNome || '').toLowerCase();
+    const cpf = (at.cpf || '').replace(/\D/g, '');
+    const motivo = (at.motivo || '').toLowerCase();
+    const tipo = (at.tipo || '').toLowerCase();
+    return nome.includes(busca) || cpf.includes(busca) || motivo.includes(busca) || tipo.includes(busca);
+  });
+  renderizarTabelaAtestados(filtrados);
+}
+
+function preencherSelectColaboradores(selectId, cpfSelecionado) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = '<option value="">-- Selecione o colaborador --</option>';
+
+  const ativos = listaFuncionariosCache.filter(f => f.ativo !== false);
+  ativos.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.cpf;
+    opt.dataset.id = f.id;
+    opt.dataset.nome = f.nome;
+    opt.dataset.cargo = f.cargo || '';
+    opt.dataset.departamento = f.departamento || '';
+    opt.textContent = `${f.nome} (CPF: ${formatarCPF(f.cpf)})`;
+    if (cpfSelecionado && f.cpf === cpfSelecionado) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function abrirModalAtestado() {
+  preencherSelectColaboradores('atestado-func-select');
+  const hojeStr = new Date().toISOString().split('T')[0];
+  document.getElementById('atestado-data-inicio').value = hojeStr;
+  document.getElementById('atestado-data-fim').value = hojeStr;
+  document.getElementById('atestado-motivo').value = '';
+  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
+}
+
+function abrirModalAtestadoParaFuncionario() {
+  const selectEspelho = document.getElementById('select-relatorio-func');
+  const cpfAtual = selectEspelho ? selectEspelho.value : '';
+  preencherSelectColaboradores('atestado-func-select', cpfAtual);
+
+  const mesAnoInput = document.getElementById('select-relatorio-mes')?.value;
+  let dataSugerida = new Date().toISOString().split('T')[0];
+  if (mesAnoInput) {
+    const partes = mesAnoInput.split('-');
+    dataSugerida = `${partes[0]}-${partes[1]}-01`;
+  }
+
+  document.getElementById('atestado-data-inicio').value = dataSugerida;
+  document.getElementById('atestado-data-fim').value = dataSugerida;
+  document.getElementById('atestado-motivo').value = '';
+  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
+}
+
+async function salvarNovoAtestado(e) {
+  e.preventDefault();
+  const select = document.getElementById('atestado-func-select');
+  const cpf = select.value;
+  if (!cpf) {
+    alert('Por favor, selecione o colaborador.');
+    return;
+  }
+
+  const opt = select.selectedOptions[0];
+  const funcNome = opt.dataset.nome || '';
+  const funcId = opt.dataset.id || '';
+  const dataInicio = document.getElementById('atestado-data-inicio').value;
+  const dataFim = document.getElementById('atestado-data-fim').value;
+  const tipo = document.getElementById('atestado-tipo-select').value;
+  const motivo = document.getElementById('atestado-motivo').value.trim();
+
+  if (dataFim < dataInicio) {
+    alert('A Data Fim não pode ser anterior à Data Início.');
+    return;
+  }
+
+  try {
+    await db.collection('atestados').add({
+      cpf: cpf,
+      funcionarioId: funcId,
+      funcionarioNome: funcNome,
+      dataInicio: dataInicio,
+      dataFim: dataFim,
+      tipo: tipo,
+      motivo: motivo,
+      abonado: true,
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+    });
+
+    if (modalAtestadoInstancia) modalAtestadoInstancia.hide();
+    mostrarToastSucesso('Atestado / Justificativa registrada com sucesso!');
+
+    carregarAtestados();
+    // Se a tela de espelho estiver visível para o mesmo funcionário, atualiza
+    const selectEspelho = document.getElementById('select-relatorio-func');
+    if (selectEspelho && selectEspelho.value === cpf) {
+      gerarEspelho();
+    }
+  } catch (err) {
+    console.error('Erro ao salvar atestado:', err);
+    alert('Erro ao salvar no Firebase: ' + err.message);
+  }
+}
+
+async function excluirAtestado(id, desc) {
+  if (!confirm(`Deseja realmente excluir este atestado?\n\n${desc}`)) return;
+
+  try {
+    await db.collection('atestados').doc(id).delete();
+    mostrarToastSucesso('Atestado excluído com sucesso.');
+    carregarAtestados();
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao excluir atestado:', err);
+    alert('Erro ao excluir: ' + err.message);
+  }
+}
+
+// ============================================================
+// ─── AJUSTE DE HORÁRIOS DO DIA (ESQUECIMENTO / CORREÇÃO) ────
+// ============================================================
+
+async function abrirModalAjusteDia(cpf, dataStr, ev) {
+  if (ev) ev.stopPropagation();
+
+  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, ''));
+  const nomeFunc = func ? func.nome : 'Colaborador';
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  const dataFormatada = `${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}`;
+
+  document.getElementById('ajuste-dia-cpf').value = cpf;
+  document.getElementById('ajuste-dia-data').value = dataStr;
+  document.getElementById('ajuste-dia-nome').textContent = nomeFunc;
+  document.getElementById('ajuste-dia-data-label').textContent = dataFormatada;
+
+  // Limpa inputs
+  ['entrada', 'almoco-saida', 'almoco-retorno', 'saida', 'saida-extra', 'retorno-extra'].forEach(tipo => {
+    document.getElementById(`ajuste-dia-${tipo}`).value = '';
+  });
+
+  document.getElementById('ajuste-dia-check-atestado').checked = false;
+  document.getElementById('ajuste-dia-box-atestado').classList.add('d-none');
+  document.getElementById('ajuste-dia-atestado-desc').value = '';
+
+  // Busca batidas deste dia para preencher horários existentes
+  try {
+    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
+    const regsDia = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    regsDia.forEach(r => {
+      const dt = extrairData(r.timestamp);
+      if (!dt) return;
+      const horaStr = dt.toTimeString().slice(0, 5); // "HH:mm"
+      if (r.tipo === 'entrada') document.getElementById('ajuste-dia-entrada').value = horaStr;
+      if (r.tipo === 'almoco_saida') document.getElementById('ajuste-dia-almoco-saida').value = horaStr;
+      if (r.tipo === 'almoco_retorno') document.getElementById('ajuste-dia-almoco-retorno').value = horaStr;
+      if (r.tipo === 'saida') document.getElementById('ajuste-dia-saida').value = horaStr;
+      if (r.tipo === 'saida_extra') document.getElementById('ajuste-dia-saida-extra').value = horaStr;
+      if (r.tipo === 'retorno_extra') document.getElementById('ajuste-dia-retorno-extra').value = horaStr;
+    });
+
+    // Verifica se já tem atestado neste dia
+    const snapAt = await db.collection('atestados').where('cpf', '==', cpf).get();
+    const at = snapAt.docs.map(d => d.data()).find(a => {
+      const ini = a.dataInicio || '';
+      const fim = a.dataFim || a.dataInicio || '';
+      return dataStr >= ini && dataStr <= fim;
+    });
+
+    if (at) {
+      document.getElementById('ajuste-dia-check-atestado').checked = true;
+      document.getElementById('ajuste-dia-box-atestado').classList.remove('d-none');
+      document.getElementById('ajuste-dia-atestado-tipo').value = at.tipo || 'Atestado Médico (Abonar Dia)';
+      document.getElementById('ajuste-dia-atestado-desc').value = at.motivo || '';
+    }
+
+  } catch (err) {
+    console.warn('Erro ao carregar batidas do dia:', err);
+  }
+
+  if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.show();
+}
+
+function toggleAtestadoNoAjuste(checked) {
+  const box = document.getElementById('ajuste-dia-box-atestado');
+  if (!box) return;
+  if (checked) box.classList.remove('d-none');
+  else box.classList.add('d-none');
+}
+
+async function salvarAjusteDia(e) {
+  e.preventDefault();
+  const cpf = document.getElementById('ajuste-dia-cpf').value;
+  const dataStr = document.getElementById('ajuste-dia-data').value;
+  const motivo = document.getElementById('ajuste-dia-motivo').value;
+
+  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, '')) || {};
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+
+  const horarios = {
+    entrada: document.getElementById('ajuste-dia-entrada').value,
+    almoco_saida: document.getElementById('ajuste-dia-almoco-saida').value,
+    almoco_retorno: document.getElementById('ajuste-dia-almoco-retorno').value,
+    saida: document.getElementById('ajuste-dia-saida').value,
+    saida_extra: document.getElementById('ajuste-dia-saida-extra').value,
+    retorno_extra: document.getElementById('ajuste-dia-retorno-extra').value
+  };
+
+  try {
+    // 1. Busca os registros existentes deste dia
+    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
+    const regsExistentes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    // 2. Para cada tipo, insere, atualiza ou apaga se estiver em branco
+    for (const [tipo, horaVal] of Object.entries(horarios)) {
+      const regAtual = regsExistentes.find(r => r.tipo === tipo);
+
+      if (horaVal) {
+        const [h, m] = horaVal.split(':').map(Number);
+        const dataBatida = new Date(ano, mes - 1, dia, h, m, 0);
+        const ts = firebase.firestore.Timestamp.fromDate(dataBatida);
+
+        if (regAtual) {
+          // Atualiza registro existente
+          await db.collection('registros').doc(regAtual.id).update({
+            timestamp: ts,
+            ajusteManual: true,
+            justificativa: motivo,
+            atualizadoPor: sessionStorage.getItem('admin_email') || 'admin'
+          });
+        } else {
+          // Insere nova batida manual
+          await db.collection('registros').add({
+            cpf: cpf,
+            funcionarioId: func.id || '',
+            funcionarioNome: func.nome || 'Colaborador',
+            cargo: func.cargo || '',
+            departamento: func.departamento || '',
+            tipo: tipo,
+            tipoLabel: TIPOS_LABEL[tipo] || tipo,
+            timestamp: ts,
+            confianca: 100,
+            ajusteManual: true,
+            justificativa: motivo,
+            criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+          });
+        }
+      } else if (regAtual) {
+        // Se o campo foi esvaziado pelo admin, remove a batida
+        await db.collection('registros').doc(regAtual.id).delete();
+      }
+    }
+
+    // 3. Trata Atestado se selecionado
+    const checkAtestado = document.getElementById('ajuste-dia-check-atestado').checked;
+    if (checkAtestado) {
+      const atTipo = document.getElementById('ajuste-dia-atestado-tipo').value;
+      const atDesc = document.getElementById('ajuste-dia-atestado-desc').value.trim() || 'Atestado / Justificativa';
+
+      await db.collection('atestados').add({
+        cpf: cpf,
+        funcionarioId: func.id || '',
+        funcionarioNome: func.nome || 'Colaborador',
+        dataInicio: dataStr,
+        dataFim: dataStr,
+        tipo: atTipo,
+        motivo: atDesc,
+        abonado: true,
+        criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+        criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+      });
+    }
+
+    if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.hide();
+    mostrarToastSucesso('Horários do dia atualizados com sucesso!');
+
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao salvar ajuste do dia:', err);
+    alert('Erro ao salvar alterações: ' + err.message);
+  }
+}
+
+// ============================================================
+// ─── INSERÇÃO DE PONTO MANUAL AVULSO ────────────────────────
+// ============================================================
+
+function abrirModalPontoManual() {
+  const selectEspelho = document.getElementById('select-relatorio-func');
+  const cpfAtual = selectEspelho ? selectEspelho.value : '';
+  preencherSelectColaboradores('ponto-manual-func', cpfAtual);
+
+  const agora = new Date();
+  document.getElementById('ponto-manual-data').value = agora.toISOString().split('T')[0];
+  document.getElementById('ponto-manual-hora').value = agora.toTimeString().slice(0, 5);
+  document.getElementById('ponto-manual-motivo').value = 'Esquecimento de registro pelo colaborador';
+
+  if (modalPontoManualInstancia) modalPontoManualInstancia.show();
+}
+
+async function salvarPontoManualAvulso(e) {
+  e.preventDefault();
+  const select = document.getElementById('ponto-manual-func');
+  const cpf = select.value;
+  if (!cpf) {
+    alert('Por favor, selecione o colaborador.');
+    return;
+  }
+
+  const opt = select.selectedOptions[0];
+  const funcNome = opt.dataset.nome || '';
+  const funcId = opt.dataset.id || '';
+  const funcCargo = opt.dataset.cargo || '';
+  const funcDep = opt.dataset.departamento || '';
+
+  const dataStr = document.getElementById('ponto-manual-data').value;
+  const horaStr = document.getElementById('ponto-manual-hora').value;
+  const tipo = document.getElementById('ponto-manual-tipo').value;
+  const motivo = document.getElementById('ponto-manual-motivo').value.trim();
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  const [h, m] = horaStr.split(':').map(Number);
+  const dataCompleta = new Date(ano, mes - 1, dia, h, m, 0);
+
+  try {
+    await db.collection('registros').add({
+      cpf: cpf,
+      funcionarioId: funcId,
+      funcionarioNome: funcNome,
+      cargo: funcCargo,
+      departamento: funcDep,
+      tipo: tipo,
+      tipoLabel: TIPOS_LABEL[tipo] || tipo,
+      timestamp: firebase.firestore.Timestamp.fromDate(dataCompleta),
+      confianca: 100,
+      ajusteManual: true,
+      justificativa: motivo,
+      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+    });
+
+    if (modalPontoManualInstancia) modalPontoManualInstancia.hide();
+    mostrarToastSucesso('Ponto manual inserido com sucesso!');
+
+    gerarEspelho();
+    carregarDadosGerais();
+  } catch (err) {
+    console.error('Erro ao salvar ponto manual:', err);
+    alert('Erro ao salvar no Firebase: ' + err.message);
+  }
+}
+
+async function excluirRegistroPonto(id, nome, hora, ev) {
+  if (ev) ev.stopPropagation();
+
+  if (!confirm(`Deseja realmente excluir esta batida de ponto?\n\nColaborador: ${nome}\nHorário: ${hora}`)) return;
+
+  try {
+    await db.collection('registros').doc(id).delete();
+    mostrarToastSucesso('Batida de ponto excluída com sucesso.');
+    carregarDadosGerais();
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao excluir registro:', err);
+    alert('Erro ao excluir batida: ' + err.message);
+  }
+}
+
+function mostrarToastSucesso(msg) {
+  alert(msg);
 }
