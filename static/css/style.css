@@ -458,13 +458,7 @@ html, body {
 
 
 
-.cabecalho-folha-oficial * {
-  color: #e2e8f0;
-}
-
-.cabecalho-folha-oficial strong {
-  color: #ffffff !important;
-}
+/* cabecalho movido para @media screen */
 
 /* Sobrescritas para manter preto e grafite limpos */
 .bg-dark {
@@ -576,6 +570,12 @@ html, body {
    ESTILOS DE TELA (DARK THEME) - ESPELHO DE PONTO
    ============================================================ */
 @media screen {
+  .cabecalho-folha-oficial * {
+    color: #e2e8f0;
+  }
+  .cabecalho-folha-oficial strong {
+    color: #ffffff !important;
+  }
   .folha-valor-destaque {
     color: #f1f5f9 !important;
   }
@@ -783,7 +783,7 @@ html, body {
     font-weight: 700 !important;
   }
 
-  /* Cabeçalho oficial no papel */
+  /* Cabeçalho oficial no papel: todos os textos e campos em PRETO NÍTIDO */
   .cabecalho-folha-oficial {
     background: #f8f9fa !important;
     color: #000000 !important;
@@ -798,7 +798,20 @@ html, body {
     margin: 0 !important;
     font-weight: 800 !important;
   }
-  .cabecalho-folha-oficial * {
+  .cabecalho-folha-oficial,
+  .cabecalho-folha-oficial *,
+  .cabecalho-folha-oficial strong,
+  .cabecalho-folha-oficial span,
+  .cabecalho-folha-oficial div,
+  .cabecalho-folha-oficial h5,
+  .folha-valor-destaque,
+  strong.folha-valor-destaque {
+    color: #000000 !important;
+  }
+  .cabecalho-folha-oficial strong,
+  .folha-valor-destaque,
+  strong.folha-valor-destaque {
+    font-weight: 700 !important;
     color: #000000 !important;
   }
 
