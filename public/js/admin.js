@@ -902,27 +902,27 @@ async function gerarEspelho() {
       totalMinutosAtrasos += atrasoDia;
 
       // Formatação para exibição
-      let totalTrabStr = '<span class="text-muted">-</span>';
+      let totalTrabStr = '<span class="ponto-vazio">-</span>';
       if (minutosDia > 0) {
         totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
       } else if (regsDia.length > 0) {
         totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
       }
 
-      const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="text-muted">Folga</span>';
-      const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="text-muted">-</span>';
+      const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="dia-semana-label">Folga</span>';
+      const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="ponto-vazio">-</span>';
       
-      let saldoDiaStr = '<span class="text-muted">-</span>';
+      let saldoDiaStr = '<span class="ponto-vazio">-</span>';
       if (extrasDia > 0) {
         saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
       } else if (atrasoDia > 0) {
         saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
       } else if (minutosDia > 0) {
-        saldoDiaStr = `<span class="text-muted">0h 00m</span>`;
+        saldoDiaStr = `<span class="dia-semana-label">0h 00m</span>`;
       }
 
       const extraTag = infoExtraTexto 
-        ? `<div class="small text-truncate no-print" style="font-size:0.68rem;color:#a855f7;"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
+        ? `<div class="tag-saida-extra no-print"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
         : '';
 
       let entradaCol = entrada;
@@ -940,12 +940,12 @@ async function gerarEspelho() {
       }
 
       linhasHtml += `
-        <tr class="${isFimDeSemana ? 'fim-de-semana opacity-75' : ''}">
-          <td><strong>${diaFormatado}</strong> <span class="text-muted small">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
-          <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'text-muted'}">${entradaCol}</span></td>
-          <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'text-muted'}">${almocoSaidaCol}</span></td>
-          <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'text-muted'}">${almocoRetornoCol}</span></td>
-          <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'text-muted'}">${saidaCol}</span></td>
+        <tr class="${isFimDeSemana ? 'fim-de-semana' : ''}">
+          <td><strong class="text-light">${diaFormatado}</strong> <span class="dia-semana-label">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
+          <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'ponto-vazio'}">${entradaCol}</span></td>
+          <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'ponto-vazio'}">${almocoSaidaCol}</span></td>
+          <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'ponto-vazio'}">${almocoRetornoCol}</span></td>
+          <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'ponto-vazio'}">${saidaCol}</span></td>
           <td>${totalTrabStr}</td>
           <td><span class="small">${cargaStr}</span></td>
           <td>${extrasStr}</td>
