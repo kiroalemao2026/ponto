@@ -91,6 +91,16 @@ async def rota_login():
 async def rota_admin():
     return FileResponse("public/admin.html")
 
+@app.get("/Ponto_Eletronico.apk")
+@app.get("/ponto.apk")
+async def rota_apk():
+    apk_path = "public/Ponto_Eletronico.apk"
+    if not os.path.exists(apk_path):
+        apk_path = "Ponto_Eletronico.apk"
+    if os.path.exists(apk_path):
+        return FileResponse(apk_path, media_type="application/vnd.android.package-archive", filename="Ponto_Eletronico.apk")
+    return {"erro": "APK não encontrado."}
+
 
 if __name__ == "__main__":
     import os
