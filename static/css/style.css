@@ -434,16 +434,7 @@ html, body {
   color: #e2e8f0 !important;
 }
 
-.dia-semana-label {
-  color: #cbd5e1 !important;
-  font-weight: 600;
-}
 
-.ponto-vazio {
-  color: #718096 !important;
-  font-family: monospace;
-  font-size: 0.85rem;
-}
 
 .tabela-folha-a4 tr.fim-de-semana {
   background: rgba(255, 255, 255, 0.04) !important;
@@ -465,20 +456,7 @@ html, body {
   display: inline-block;
 }
 
-.bloco-assinaturas p {
-  color: #cbd5e1 !important;
-  font-weight: 500;
-}
 
-.bloco-assinaturas span {
-  color: #cbd5e1 !important;
-  font-weight: 500;
-}
-
-.linha-assinatura strong {
-  color: #ffffff !important;
-  font-size: 0.95rem;
-}
 
 .cabecalho-folha-oficial * {
   color: #e2e8f0;
@@ -593,38 +571,118 @@ html, body {
 /* ============================================================
    ESTILOS DE IMPRESSÃO — ESPELHO DE PONTO A4 (FOLHA ÚNICA)
    ============================================================ */
+
+/* ============================================================
+   ESTILOS DE TELA (DARK THEME) - ESPELHO DE PONTO
+   ============================================================ */
+@media screen {
+  .folha-valor-destaque {
+    color: #f1f5f9 !important;
+  }
+  .tabela-folha-a4 {
+    color: #e2e8f0;
+  }
+  .dia-semana-label {
+    color: #cbd5e1 !important;
+    font-weight: 600;
+  }
+  .ponto-vazio {
+    color: #94a3b8 !important;
+    font-family: monospace;
+    font-size: 0.85rem;
+  }
+  .tag-saida-extra {
+    font-size: 0.72rem;
+    color: #d8b4fe !important;
+    font-weight: 600;
+    margin-top: 3px;
+    background: rgba(168, 85, 247, 0.18);
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    display: inline-block;
+  }
+  .folha-a4-individual {
+    background: transparent;
+    margin-bottom: 3.5rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px dashed rgba(255, 255, 255, 0.15);
+  }
+  .folha-a4-individual:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  .resumo-folha-rodape {
+    display: flex;
+    justify-content: space-between;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 7px 14px;
+    font-size: 0.85rem;
+    color: #f8fafc;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .bloco-assinaturas {
+    border-top: 1px solid #475569 !important;
+  }
+  .texto-declaracao-folha {
+    color: #cbd5e1 !important;
+    font-weight: 500;
+    font-size: 0.84rem;
+  }
+  .linha-assinatura {
+    border-top: 1.5px solid #64748b;
+    width: 85%;
+    margin: 0 auto;
+    padding-top: 8px;
+  }
+  .nome-assinatura {
+    color: #ffffff !important;
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+  .data-assinatura {
+    color: #cbd5e1 !important;
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: inline-block;
+    margin-top: 4px;
+  }
+}
+
+/* ============================================================
+   ESTILOS DE IMPRESSÃO (A4 100% PRETO NÍTIDO / SALVAR PDF)
+   ============================================================ */
 @media print {
   @page {
     size: A4 portrait;
-    margin: 5mm 7mm 5mm 7mm;
+    margin: 5mm 6mm 5mm 6mm;
   }
 
-  html, body {
+  body, html {
     background: #ffffff !important;
-    color: #111111 !important;
-    font-size: 8pt !important;
-    line-height: 1.15 !important;
-    width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
+    color: #000000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
-  /* Oculta tudo que não faz parte da folha de ponto física */
-  .admin-sidebar,
-  .brand,
-  .no-print,
-  button,
-  .btn,
+  .sidebar,
+  .top-navbar,
+  .admin-header,
   .barra-filtro-espelho,
-  .modal,
-  .aba-secao:not(#aba-relatorios) {
+  .no-print,
+  .btn,
+  .alert {
     display: none !important;
   }
 
-  /* Expande o conteúdo principal */
-  .admin-content {
+  .main-content {
     margin: 0 !important;
     padding: 0 !important;
     width: 100% !important;
@@ -649,25 +707,55 @@ html, body {
   #folha-impressao-a4 {
     display: block !important;
     width: 100% !important;
-    page-break-inside: avoid !important;
-    page-break-after: avoid !important;
     background: #ffffff !important;
-    color: #111111 !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Cada colaborador tem sua folha A4 individual exata */
+  .folha-a4-individual {
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    width: 100% !important;
+    min-height: 98vh !important;
+    max-height: 100vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .folha-a4-individual:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .folha-valor-destaque {
+    color: #000000 !important;
+    font-weight: 700 !important;
   }
 
   /* Cabeçalho oficial no papel */
   .cabecalho-folha-oficial {
     background: #f8f9fa !important;
     color: #000000 !important;
-    border: 1px solid #333333 !important;
+    border: 1.5px solid #000000 !important;
     border-radius: 4px !important;
-    padding: 5px 8px !important;
-    margin-bottom: 5px !important;
+    padding: 4px 8px !important;
+    margin-bottom: 4px !important;
   }
   .cabecalho-folha-oficial h5 {
-    font-size: 10.5pt !important;
+    font-size: 10pt !important;
     color: #000000 !important;
     margin: 0 !important;
+    font-weight: 800 !important;
   }
   .cabecalho-folha-oficial * {
     color: #000000 !important;
@@ -677,57 +765,88 @@ html, body {
   .tabela-folha-a4 {
     width: 100% !important;
     border-collapse: collapse !important;
-    margin-bottom: 5px !important;
-    font-size: 7.2pt !important;
+    margin-bottom: 4px !important;
+    font-size: 6.9pt !important;
   }
   .tabela-folha-a4 th,
   .tabela-folha-a4 td {
     border: 1px solid #333333 !important;
-    padding: 1.8px 3px !important;
+    padding: 1.3px 3px !important;
     text-align: center !important;
     color: #000000 !important;
-    line-height: 1.1 !important;
+    line-height: 1.05 !important;
   }
   .tabela-folha-a4 th {
     background: #e9ecef !important;
     font-weight: 700 !important;
-    font-size: 7.4pt !important;
+    font-size: 7.1pt !important;
   }
   .tabela-folha-a4 tr.fim-de-semana td {
-    background: #f5f5f5 !important;
-    color: #444444 !important;
+    background: #f8f9fa !important;
+    color: #333333 !important;
   }
 
-  /* Badges na impressão viram texto direto */
+  /* Badges na impressão viram texto direto em preto */
   .badge {
     border: none !important;
     background: transparent !important;
     color: #000000 !important;
-    font-size: 7.2pt !important;
+    font-size: 6.9pt !important;
     padding: 0 !important;
     font-weight: 700 !important;
   }
 
-  /* Bloco de Assinaturas */
-  .bloco-assinaturas {
-    margin-top: 8px !important;
-    padding-top: 5px !important;
-    border-top: 1px dashed #555555 !important;
-    page-break-inside: avoid !important;
+  /* Mini Resumo de Totais no Rodapé da Tabela */
+  .resumo-folha-rodape {
+    display: flex !important;
+    justify-content: space-between !important;
+    border: 1px solid #000000 !important;
+    background: #f1f5f9 !important;
+    color: #000000 !important;
+    font-size: 7.1pt !important;
+    padding: 2px 6px !important;
+    margin-bottom: 4px !important;
+    font-weight: 600 !important;
   }
-  .bloco-assinaturas p {
+  .resumo-folha-rodape * {
+    color: #000000 !important;
+  }
+
+  /* Bloco de Assinaturas - 100% PRETO NÍTIDO NO PAPEL / PDF */
+  .bloco-assinaturas {
+    margin-top: 5px !important;
+    padding-top: 4px !important;
+    border-top: 1px dashed #333333 !important;
+    page-break-inside: avoid !important;
+    color: #000000 !important;
+  }
+  .texto-declaracao-folha {
     font-size: 6.8pt !important;
-    margin-bottom: 22px !important;
-    color: #333333 !important;
+    margin-bottom: 20px !important;
+    color: #000000 !important;
+    line-height: 1.15 !important;
+    font-style: italic !important;
+    text-align: center !important;
   }
   .linha-assinatura {
-    border-top: 1px solid #000000 !important;
+    border-top: 1.5px solid #000000 !important;
     width: 85% !important;
     margin: 0 auto !important;
     padding-top: 4px !important;
-    font-size: 7.5pt !important;
+    text-align: center !important;
   }
-  .linha-assinatura * {
+  .linha-assinatura *,
+  .nome-assinatura {
     color: #000000 !important;
+    font-size: 8.5pt !important;
+    font-weight: 700 !important;
+    display: block !important;
+  }
+  .data-assinatura {
+    color: #000000 !important;
+    font-size: 7.5pt !important;
+    font-weight: 600 !important;
+    display: inline-block !important;
+    margin-top: 2px !important;
   }
 }

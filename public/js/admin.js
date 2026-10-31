@@ -677,6 +677,18 @@ function imprimirFolhaA4() {
   window.print();
 }
 
+async function imprimirTodosA4() {
+  const selectFunc = document.getElementById('select-relatorio-func');
+  if (selectFunc) {
+    selectFunc.value = 'TODOS';
+  }
+  await gerarEspelho();
+  // Aguarda 350ms para garantir renderização do DOM antes de abrir o diálogo do navegador
+  setTimeout(() => {
+    window.print();
+  }, 350);
+}
+
 async function carregarOpcoesRelatorio() {
   const select = document.getElementById('select-relatorio-func');
   const inputMes = document.getElementById('select-relatorio-mes');
@@ -695,77 +707,377 @@ async function carregarOpcoesRelatorio() {
     return;
   }
 
-  select.innerHTML = listaFuncionariosCache.map(f => 
+  const opcoesColaboradores = listaFuncionariosCache.map(f => 
     `<option value="${f.cpf}">${f.nome} (CPF: ${formatarCPF(f.cpf)})</option>`
   ).join('');
 
-  // Seleciona automaticamente o primeiro funcionário se não selecionado
-  if (!select.value && listaFuncionariosCache.length > 0) {
+  select.innerHTML = `
+    <option value="TODOS">📋 Todos os Colaboradores (Folha de Todos)</option>
+    ${opcoesColaboradores}
+  `;
+
+  // Seleciona automaticamente o primeiro colaborador por padrão para visualização rápida
+  if (!select.value || select.value === 'TODOS') {
     select.value = listaFuncionariosCache[0].cpf;
   }
   await gerarEspelho();
 }
 
+// ─── Motor de Cálculo de Espelho por Colaborador ────────────────────────
+function calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados) {
+  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
+  const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
+  const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
+  const diasMes = dataFim.getDate();
+  const tInicioMs = dataInicio.getTime();
+  const tFimMs = dataFim.getTime();
+
+  const registros = todosRegistros.filter(r => {
+    const rCpf = (r.cpf || '').replace(/\D/g, '');
+    const dt = extrairData(r.timestamp)?.getTime() || 0;
+    return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
+  });
+
+  const atestadosFunc = todosAtestados.filter(a => {
+    const aCpf = (a.cpf || '').replace(/\D/g, '');
+    return aCpf === cleanCpf;
+  });
+
+  let linhasHtml = '';
+  let totalMinutosTrabalhados = 0;
+  let totalMinutosPrevistos = 0;
+  let totalMinutosExtras = 0;
+  let totalMinutosAtrasos = 0;
+  let diasTrabalhados = 0;
+
+  for (let dia = 1; dia <= diasMes; dia++) {
+    const dataDia = new Date(ano, mes - 1, dia);
+    const diaFormatado = String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0');
+    const diaSemana = dataDia.getDay(); // 0 = Dom, 6 = Sáb
+    const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][diaSemana];
+    const isFimDeSemana = diaSemana === 0 || diaSemana === 6;
+
+    // Carga horária prevista do dia em minutos
+    let minutosPrevistos = 0;
+    if (jornadaTipo === '8h_seg_sex') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : 0;
+    } else if (jornadaTipo === '8h_seg_sex_4h_sab') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : (diaSemana === 6 ? 240 : 0);
+    } else if (jornadaTipo === '6h_diarias') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 360 : 0;
+    }
+    totalMinutosPrevistos += minutosPrevistos;
+
+    const regsDia = registros.filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    const regEntrada = regsDia.find(r => r.tipo === 'entrada');
+    const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
+    const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
+    const regSaida = regsDia.find(r => r.tipo === 'saida');
+    const regsSaidaExtra = regsDia.filter(r => r.tipo === 'saida_extra');
+    const regsRetornoExtra = regsDia.filter(r => r.tipo === 'retorno_extra');
+
+    const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const almocoRetorno = regAlmocoRetorno ? extrairData(regAlmocoRetorno.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const saida = regSaida ? extrairData(regSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+
+    // Cálculo de minutos trabalhados
+    let minutosDia = 0;
+    const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
+
+    let minutosExtrasFora = 0;
+    let infoExtraTexto = '';
+    regsSaidaExtra.forEach((se, idx) => {
+      const re = regsRetornoExtra[idx];
+      const hSe = extrairData(se.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '';
+      const hRe = re ? extrairData(re.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : 'em aberto';
+      if (re) {
+        const fora = Math.max(0, Math.round((getMs(re) - getMs(se)) / 60000));
+        minutosExtrasFora += fora;
+      }
+      infoExtraTexto += `${infoExtraTexto ? ', ' : ''}${hSe} às ${hRe}`;
+    });
+
+    if (regEntrada && regSaida) {
+      if (regAlmocoSaida && regAlmocoRetorno) {
+        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
+                     Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
+      } else {
+        minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
+      }
+      minutosDia = Math.max(0, minutosDia - minutosExtrasFora);
+    } else if (regEntrada && regAlmocoSaida && !regSaida) {
+      minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
+    }
+
+    // Verifica se há atestado neste dia
+    const dataDiaStr = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    const atestadoDoDia = atestadosFunc.find(a => {
+      const ini = a.dataInicio || '';
+      const fim = a.dataFim || a.dataInicio || '';
+      return dataDiaStr >= ini && dataDiaStr <= fim;
+    });
+
+    let extrasDia = 0;
+    let atrasoDia = 0;
+
+    if (atestadoDoDia) {
+      atrasoDia = 0;
+      if (minutosDia > 0) {
+        diasTrabalhados++;
+        totalMinutosTrabalhados += minutosDia;
+        if (minutosDia > minutosPrevistos) {
+          extrasDia = minutosDia - minutosPrevistos;
+        }
+      }
+    } else if (regsDia.length > 0) {
+      diasTrabalhados++;
+      totalMinutosTrabalhados += minutosDia;
+
+      if (minutosPrevistos === 0) {
+        extrasDia = minutosDia;
+      } else {
+        if (minutosDia > minutosPrevistos) {
+          extrasDia = minutosDia - minutosPrevistos;
+        } else if (minutosDia < minutosPrevistos && regSaida) {
+          atrasoDia = minutosPrevistos - minutosDia;
+        }
+      }
+    }
+
+    totalMinutosExtras += extrasDia;
+    totalMinutosAtrasos += atrasoDia;
+
+    let totalTrabStr = '<span class="ponto-vazio">-</span>';
+    if (minutosDia > 0) {
+      totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
+    } else if (regsDia.length > 0) {
+      totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
+    }
+
+    const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="dia-semana-label">Folga</span>';
+    const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="ponto-vazio">-</span>';
+    
+    let saldoDiaStr = '<span class="ponto-vazio">-</span>';
+    if (extrasDia > 0) {
+      saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
+    } else if (atrasoDia > 0) {
+      saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
+    } else if (minutosDia > 0) {
+      saldoDiaStr = `<span class="dia-semana-label">0h 00m</span>`;
+    }
+
+    const extraTag = infoExtraTexto 
+      ? `<div class="tag-saida-extra no-print"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
+      : '';
+
+    let entradaCol = entrada;
+    let almocoSaidaCol = almocoSaida;
+    let almocoRetornoCol = almocoRetorno;
+    let saidaCol = saida;
+    let atestadoTag = '';
+
+    if (atestadoDoDia) {
+      atestadoTag = `<div class="small text-truncate mt-1" style="font-size:0.68rem;color:#f59e0b;"><i class="fas fa-file-medical me-1"></i>${atestadoDoDia.tipo || 'Atestado'}</div>`;
+      if (minutosDia === 0 && regsDia.length === 0) {
+        totalTrabStr = `<span class="badge border border-warning text-warning" style="background:rgba(245,158,11,0.12);font-size:0.72rem;">Abonado (${cargaStr})</span>`;
+        saldoDiaStr = `<span class="text-warning fw-bold small">Abonado</span>`;
+      }
+    }
+
+    linhasHtml += `
+      <tr class="${isFimDeSemana ? 'fim-de-semana' : ''}">
+        <td><strong class="folha-valor-destaque">${diaFormatado}</strong> <span class="dia-semana-label">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
+        <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'ponto-vazio'}">${entradaCol}</span></td>
+        <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'ponto-vazio'}">${almocoSaidaCol}</span></td>
+        <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'ponto-vazio'}">${almocoRetornoCol}</span></td>
+        <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'ponto-vazio'}">${saidaCol}</span></td>
+        <td>${totalTrabStr}</td>
+        <td><span class="small">${cargaStr}</span></td>
+        <td>${extrasStr}</td>
+        <td>${saldoDiaStr}</td>
+        <td class="no-print text-center">
+          <button class="btn btn-sm btn-outline-warning p-1" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;" onclick="abrirModalAjusteDia('${cleanCpf}', '${dataDiaStr}', event)" title="Ajustar batidas ou atestado deste dia">
+            <i class="fas fa-edit" style="font-size:0.75rem;"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }
+
+  const saldoTotalMinutos = totalMinutosExtras - totalMinutosAtrasos;
+
+  return {
+    linhasHtml,
+    resumo: {
+      totalMinutosTrabalhados,
+      totalMinutosPrevistos,
+      totalMinutosExtras,
+      totalMinutosAtrasos,
+      saldoTotalMinutos,
+      diasTrabalhados
+    }
+  };
+}
+
+// ─── Renderizador de Folha A4 Individual ────────────────────────────────
+function renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dadosEspelho, dataEmissaoStr) {
+  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
+  const nomeFunc = func.nome || 'Colaborador';
+  const cargoFunc = func.cargo || 'Não informado';
+  const depFunc = func.departamento || 'Geral';
+  const diasMes = new Date(ano, mes, 0).getDate();
+  const periodoStr = `01/${String(mes).padStart(2, '0')}/${ano} a ${String(diasMes).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+
+  const rotulosJornada = {
+    '8h_seg_sex': '8 horas diárias (Seg a Sex - 40h/sem)',
+    '8h_seg_sex_4h_sab': '8h Seg-Sex + 4h Sáb (44h/sem CLT)',
+    '6h_diarias': '6 horas diárias (Seg a Sex - 30h/sem)'
+  };
+  const jornadaRotulo = rotulosJornada[jornadaTipo] || '8 horas diárias';
+
+  const resumo = dadosEspelho.resumo;
+  const saldoSinal = resumo.saldoTotalMinutos >= 0 ? '+' : '-';
+  const saldoClasse = resumo.saldoTotalMinutos >= 0 ? 'text-success' : 'text-danger';
+
+  return `
+    <div class="folha-a4-individual">
+      <!-- Cabeçalho Oficial do Documento -->
+      <div class="cabecalho-folha-oficial mb-2 p-2 border border-secondary rounded bg-dark">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <h5 class="fw-bold mb-0 text-light text-uppercase">Espelho de Ponto Individual de Trabalho</h5>
+            <span class="text-accent small fw-bold"><i class="fas fa-clock me-1"></i> Mobilittà — Sistema de Ponto Eletrônico</span>
+          </div>
+          <div class="text-end small">
+            <div>Período: <strong class="folha-valor-destaque">${periodoStr}</strong></div>
+            <div>Emissão: <strong class="folha-valor-destaque">${dataEmissaoStr}</strong></div>
+          </div>
+        </div>
+        <div class="border-top border-secondary my-1 pt-1 row g-2 small">
+          <div class="col-4">Colaborador: <strong class="folha-valor-destaque">${nomeFunc}</strong></div>
+          <div class="col-4">CPF: <strong class="folha-valor-destaque">${formatarCPF(cleanCpf)}</strong></div>
+          <div class="col-4">Cargo: <strong class="folha-valor-destaque">${cargoFunc}</strong></div>
+          <div class="col-4">Departamento: <strong class="folha-valor-destaque">${depFunc}</strong></div>
+          <div class="col-8">Regime / Carga: <strong class="folha-valor-destaque">${jornadaRotulo}</strong></div>
+        </div>
+      </div>
+
+      <!-- Tabela Detalhada com Horas Extras e Saldos -->
+      <div class="table-responsive">
+        <table class="admin-table tabela-folha-a4">
+          <thead>
+            <tr>
+              <th style="width: 13%;">Dia</th>
+              <th style="width: 10%;">Entrada</th>
+              <th style="width: 11%;">Saída Almoço</th>
+              <th style="width: 11%;">Ret. Almoço</th>
+              <th style="width: 10%;">Saída</th>
+              <th style="width: 11%;">Total Trab.</th>
+              <th style="width: 10%;">Carga</th>
+              <th style="width: 11%;">H. Extras (+)</th>
+              <th style="width: 10%;">Saldo Dia</th>
+              <th style="width: 5%;" class="no-print text-center">Ajuste</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dadosEspelho.linhasHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Mini Resumo de Totais no Rodapé da Tabela -->
+      <div class="resumo-folha-rodape">
+        <div>Total Trab.: <strong>${formatarHM(resumo.totalMinutosTrabalhados)}</strong></div>
+        <div>Carga Prevista: <strong>${formatarHM(resumo.totalMinutosPrevistos)}</strong></div>
+        <div>Horas Extras (+): <strong class="text-success">+${formatarHM(resumo.totalMinutosExtras)}</strong></div>
+        <div>Atrasos/Faltas (-): <strong class="text-danger">-${formatarHM(resumo.totalMinutosAtrasos)}</strong></div>
+        <div>Saldo do Mês: <strong class="${saldoClasse}">${saldoSinal}${formatarHM(Math.abs(resumo.saldoTotalMinutos))}</strong></div>
+      </div>
+
+      <!-- Termo de Declaração e Bloco de Assinatura para Conferência -->
+      <div class="bloco-assinaturas mt-2 pt-2 border-top border-secondary">
+        <p class="small text-center mb-4 fst-italic texto-declaracao-folha">
+          "Reconheço a exatidão das anotações constantes neste espelho de ponto referente ao período indicado, concordando com as horas normais, horas extras e saldos apurados."
+        </p>
+        <div class="row text-center g-4 pt-1">
+          <div class="col-6">
+            <div class="linha-assinatura">
+              <strong class="d-block nome-assinatura">${nomeFunc}</strong>
+              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="linha-assinatura">
+              <strong class="d-block nome-assinatura">Assinatura do Empregador / RH</strong>
+              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function atualizarCardsResumoTopo(resumo) {
+  const elTotalHoras = document.getElementById('total-horas-mes');
+  if (elTotalHoras) elTotalHoras.textContent = formatarHM(resumo.totalMinutosTrabalhados);
+
+  const elCargaPrevista = document.getElementById('total-carga-prevista-mes');
+  if (elCargaPrevista) elCargaPrevista.textContent = formatarHM(resumo.totalMinutosPrevistos);
+
+  const elHorasExtras = document.getElementById('total-horas-extras-mes');
+  if (elHorasExtras) elHorasExtras.textContent = `+${formatarHM(resumo.totalMinutosExtras)}`;
+
+  const elAtrasos = document.getElementById('total-atrasos-mes');
+  if (elAtrasos) elAtrasos.textContent = `-${formatarHM(resumo.totalMinutosAtrasos)}`;
+
+  const elSaldoHoras = document.getElementById('saldo-horas-mes');
+  if (elSaldoHoras) {
+    if (resumo.saldoTotalMinutos >= 0) {
+      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-success';
+      elSaldoHoras.textContent = `+${formatarHM(resumo.saldoTotalMinutos)}`;
+    } else {
+      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-danger';
+      elSaldoHoras.textContent = `-${formatarHM(Math.abs(resumo.saldoTotalMinutos))}`;
+    }
+  }
+}
+
+// ─── Geração Principal (Individual ou em Lote de Todos) ───────────────────
 async function gerarEspelho() {
   const selectFunc = document.getElementById('select-relatorio-func');
   const inputMes = document.getElementById('select-relatorio-mes');
   const selectJornada = document.getElementById('select-relatorio-jornada');
-  const tbody = document.getElementById('tabela-espelho-corpo');
+  const containerFolhas = document.getElementById('folha-impressao-a4');
+  const resumoCards = document.getElementById('resumo-horas-mes');
 
   if (!inputMes.value) {
     const agora = new Date();
     inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
   }
 
-  const cpf = selectFunc ? selectFunc.value : '';
+  const funcSelecionado = selectFunc ? selectFunc.value : '';
   const mesAno = inputMes ? inputMes.value : '';
   const jornadaTipo = selectJornada ? selectJornada.value : '8h_seg_sex';
 
-  if (!cpf || !mesAno) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Selecione um funcionário e mês acima.</td></tr>';
+  if (!funcSelecionado || !mesAno) {
+    if (containerFolhas) {
+      containerFolhas.innerHTML = '<div class="text-center py-4 text-muted">Selecione um colaborador e mês acima.</div>';
+    }
     return;
   }
 
   const [ano, mes] = mesAno.split('-').map(Number);
-  const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
-  const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
-  const diasMes = dataFim.getDate();
+  const dataEmissaoStr = new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
 
-  const cleanCpf = cpf.replace(/\D/g, '');
-  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
-  const nomeFunc = func ? func.nome : 'Colaborador';
-
-  // Atualiza cabeçalho oficial do espelho (visível na tela e na impressão A4)
-  const elPeriodo = document.getElementById('folha-periodo-str');
-  if (elPeriodo) {
-    elPeriodo.textContent = `01/${String(mes).padStart(2, '0')}/${ano} a ${String(diasMes).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+  if (containerFolhas) {
+    containerFolhas.innerHTML = '<div class="text-center py-5 text-muted no-print"><i class="fas fa-spinner fa-spin fa-2x mb-3 text-accent"></i><br>Carregando registros e apurando espelhos de ponto...</div>';
   }
-  const elEmissao = document.getElementById('folha-data-emissao');
-  if (elEmissao) {
-    const agora = new Date();
-    elEmissao.textContent = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-  }
-  const elFuncNome = document.getElementById('folha-func-nome');
-  if (elFuncNome) elFuncNome.textContent = nomeFunc;
-  const elFuncCpf = document.getElementById('folha-func-cpf');
-  if (elFuncCpf) elFuncCpf.textContent = formatarCPF(cleanCpf);
-  const elFuncCargo = document.getElementById('folha-func-cargo');
-  if (elFuncCargo) elFuncCargo.textContent = func?.cargo || 'Não informado';
-  const elFuncDep = document.getElementById('folha-func-dep');
-  if (elFuncDep) elFuncDep.textContent = func?.departamento || 'Geral';
-  const elFuncJornada = document.getElementById('folha-func-jornada');
-  if (elFuncJornada) {
-    const rotulos = {
-      '8h_seg_sex': '8 horas diárias (Seg a Sex - 40h/sem)',
-      '8h_seg_sex_4h_sab': '8h Seg-Sex + 4h Sáb (44h/sem CLT)',
-      '6h_diarias': '6 horas diárias (Seg a Sex - 30h/sem)'
-    };
-    elFuncJornada.textContent = rotulos[jornadaTipo] || '8 horas diárias';
-  }
-  const elAssinaturaFunc = document.getElementById('assinatura-nome-func');
-  if (elAssinaturaFunc) elAssinaturaFunc.textContent = nomeFunc;
-
-  tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Calculando espelho e horas extras...</td></tr>';
 
   try {
     const [snapReg, snapAtestados] = await Promise.all([
@@ -773,222 +1085,58 @@ async function gerarEspelho() {
       db.collection('atestados').get()
     ]);
 
-    const tInicioMs = dataInicio.getTime();
-    const tFimMs = dataFim.getTime();
+    const todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
+    const todosAtestados = snapAtestados.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    const registros = snapReg.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
-      const rCpf = (r.cpf || '').replace(/\D/g, '');
-      const dt = extrairData(r.timestamp)?.getTime() || 0;
-      return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
-    });
-
-    const atestadosFunc = snapAtestados.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => {
-      const aCpf = (a.cpf || '').replace(/\D/g, '');
-      return aCpf === cleanCpf;
-    });
-
-    let linhasHtml = '';
-    let totalMinutosTrabalhados = 0;
-    let totalMinutosPrevistos = 0;
-    let totalMinutosExtras = 0;
-    let totalMinutosAtrasos = 0;
-    let diasTrabalhados = 0;
-
-    for (let dia = 1; dia <= diasMes; dia++) {
-      const dataDia = new Date(ano, mes - 1, dia);
-      const diaFormatado = String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0');
-      const diaSemana = dataDia.getDay(); // 0 = Dom, 6 = Sáb
-      const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][diaSemana];
-      const isFimDeSemana = diaSemana === 0 || diaSemana === 6;
-
-      // Carga horária prevista do dia em minutos
-      let minutosPrevistos = 0;
-      if (jornadaTipo === '8h_seg_sex') {
-        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : 0;
-      } else if (jornadaTipo === '8h_seg_sex_4h_sab') {
-        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : (diaSemana === 6 ? 240 : 0);
-      } else if (jornadaTipo === '6h_diarias') {
-        minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 360 : 0;
-      }
-      totalMinutosPrevistos += minutosPrevistos;
-
-      const regsDia = registros.filter(r => {
-        const dt = extrairData(r.timestamp);
-        return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
-      });
-
-      const regEntrada = regsDia.find(r => r.tipo === 'entrada');
-      const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
-      const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
-      const regSaida = regsDia.find(r => r.tipo === 'saida');
-      const regsSaidaExtra = regsDia.filter(r => r.tipo === 'saida_extra');
-      const regsRetornoExtra = regsDia.filter(r => r.tipo === 'retorno_extra');
-
-      const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-      const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-      const almocoRetorno = regAlmocoRetorno ? extrairData(regAlmocoRetorno.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-      const saida = regSaida ? extrairData(regSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-
-      // Cálculo de minutos trabalhados
-      let minutosDia = 0;
-      const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
-
-      // Desconto de intervalos de saídas extras
-      let minutosExtrasFora = 0;
-      let infoExtraTexto = '';
-      regsSaidaExtra.forEach((se, idx) => {
-        const re = regsRetornoExtra[idx];
-        const hSe = extrairData(se.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '';
-        const hRe = re ? extrairData(re.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : 'em aberto';
-        if (re) {
-          const fora = Math.max(0, Math.round((getMs(re) - getMs(se)) / 60000));
-          minutosExtrasFora += fora;
-        }
-        infoExtraTexto += `${infoExtraTexto ? ', ' : ''}${hSe} às ${hRe}`;
-      });
-
-      if (regEntrada && regSaida) {
-        if (regAlmocoSaida && regAlmocoRetorno) {
-          minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
-                       Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
-        } else {
-          minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
-        }
-        // Desconta tempo ausente em saídas extras
-        minutosDia = Math.max(0, minutosDia - minutosExtrasFora);
-      } else if (regEntrada && regAlmocoSaida && !regSaida) {
-        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
+    if (funcSelecionado === 'TODOS') {
+      // ── MODO TODOS OS COLABORADORES (IMPRESSÃO EM LOTE) ──
+      const funcsAtivos = listaFuncionariosCache.filter(f => f.ativo !== false);
+      if (funcsAtivos.length === 0) {
+        containerFolhas.innerHTML = '<div class="alert alert-warning">Nenhum colaborador ativo encontrado para geração do espelho.</div>';
+        return;
       }
 
-      // Verifica se há atestado neste dia
-      const dataDiaStr = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-      const atestadoDoDia = atestadosFunc.find(a => {
-        const ini = a.dataInicio || '';
-        const fim = a.dataFim || a.dataInicio || '';
-        return dataDiaStr >= ini && dataDiaStr <= fim;
-      });
+      if (resumoCards) resumoCards.classList.add('d-none');
 
-      // Cálculo de Horas Extras e Atrasos / Faltas
-      let extrasDia = 0;
-      let atrasoDia = 0;
-
-      if (atestadoDoDia) {
-        // Dia abonado por atestado / justificativa médica -> Não desconta falta ou atraso
-        atrasoDia = 0;
-        if (minutosDia > 0) {
-          diasTrabalhados++;
-          totalMinutosTrabalhados += minutosDia;
-          if (minutosDia > minutosPrevistos) {
-            extrasDia = minutosDia - minutosPrevistos;
-          }
-        }
-      } else if (regsDia.length > 0) {
-        diasTrabalhados++;
-        totalMinutosTrabalhados += minutosDia;
-
-        if (minutosPrevistos === 0) {
-          // Trabalho em dia de descanso (Folga/DSR) -> 100% Horas Extras
-          extrasDia = minutosDia;
-        } else {
-          if (minutosDia > minutosPrevistos) {
-            extrasDia = minutosDia - minutosPrevistos;
-          } else if (minutosDia < minutosPrevistos && regSaida) {
-            atrasoDia = minutosPrevistos - minutosDia;
-          }
-        }
-      }
-
-      totalMinutosExtras += extrasDia;
-      totalMinutosAtrasos += atrasoDia;
-
-      // Formatação para exibição
-      let totalTrabStr = '<span class="ponto-vazio">-</span>';
-      if (minutosDia > 0) {
-        totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
-      } else if (regsDia.length > 0) {
-        totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
-      }
-
-      const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="dia-semana-label">Folga</span>';
-      const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="ponto-vazio">-</span>';
-      
-      let saldoDiaStr = '<span class="ponto-vazio">-</span>';
-      if (extrasDia > 0) {
-        saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
-      } else if (atrasoDia > 0) {
-        saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
-      } else if (minutosDia > 0) {
-        saldoDiaStr = `<span class="dia-semana-label">0h 00m</span>`;
-      }
-
-      const extraTag = infoExtraTexto 
-        ? `<div class="tag-saida-extra no-print"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
-        : '';
-
-      let entradaCol = entrada;
-      let almocoSaidaCol = almocoSaida;
-      let almocoRetornoCol = almocoRetorno;
-      let saidaCol = saida;
-      let atestadoTag = '';
-
-      if (atestadoDoDia) {
-        atestadoTag = `<div class="small text-truncate mt-1" style="font-size:0.68rem;color:#f59e0b;"><i class="fas fa-file-medical me-1"></i>${atestadoDoDia.tipo || 'Atestado'}</div>`;
-        if (minutosDia === 0 && regsDia.length === 0) {
-          totalTrabStr = `<span class="badge border border-warning text-warning" style="background:rgba(245,158,11,0.12);font-size:0.72rem;">Abonado (${cargaStr})</span>`;
-          saldoDiaStr = `<span class="text-warning fw-bold small">Abonado</span>`;
-        }
-      }
-
-      linhasHtml += `
-        <tr class="${isFimDeSemana ? 'fim-de-semana' : ''}">
-          <td><strong class="text-light">${diaFormatado}</strong> <span class="dia-semana-label">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
-          <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'ponto-vazio'}">${entradaCol}</span></td>
-          <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'ponto-vazio'}">${almocoSaidaCol}</span></td>
-          <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'ponto-vazio'}">${almocoRetornoCol}</span></td>
-          <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'ponto-vazio'}">${saidaCol}</span></td>
-          <td>${totalTrabStr}</td>
-          <td><span class="small">${cargaStr}</span></td>
-          <td>${extrasStr}</td>
-          <td>${saldoDiaStr}</td>
-          <td class="no-print text-center">
-            <button class="btn btn-sm btn-outline-warning p-1" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;" onclick="abrirModalAjusteDia('${cleanCpf}', '${dataDiaStr}', event)" title="Ajustar batidas ou atestado deste dia">
-              <i class="fas fa-edit" style="font-size:0.75rem;"></i>
-            </button>
-          </td>
-        </tr>
+      let htmlTodasFolhas = `
+        <div class="alert alert-primary no-print d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <i class="fas fa-users me-2"></i>
+            <strong>Modo Todos os Colaboradores:</strong> Visualizando espelho de ponto de <strong>${funcsAtivos.length}</strong> colaboradores do mês <strong>${String(mes).padStart(2,'0')}/${ano}</strong>.
+          </div>
+          <button class="btn btn-sm btn-success" onclick="imprimirFolhaA4()">
+            <i class="fas fa-print me-1"></i> Imprimir Todos Agora (Lote)
+          </button>
+        </div>
       `;
+
+      funcsAtivos.forEach((func) => {
+        const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
+        htmlTodasFolhas += renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
+      });
+
+      containerFolhas.innerHTML = htmlTodasFolhas;
+    } else {
+      // ── MODO COLABORADOR INDIVIDUAL ──
+      if (resumoCards) resumoCards.classList.remove('d-none');
+      const cleanCpf = funcSelecionado.replace(/\D/g, '');
+      const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf) || {
+        cpf: cleanCpf,
+        nome: 'Colaborador',
+        cargo: 'Não informado',
+        departamento: 'Geral'
+      };
+
+      const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
+      containerFolhas.innerHTML = renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
+
+      atualizarCardsResumoTopo(dados.resumo);
     }
-
-    tbody.innerHTML = linhasHtml;
-
-    // Atualiza cards de resumo superiores na tela
-    const elTotalHoras = document.getElementById('total-horas-mes');
-    if (elTotalHoras) elTotalHoras.textContent = formatarHM(totalMinutosTrabalhados);
-
-    const elCargaPrevista = document.getElementById('total-carga-prevista-mes');
-    if (elCargaPrevista) elCargaPrevista.textContent = formatarHM(totalMinutosPrevistos);
-
-    const elHorasExtras = document.getElementById('total-horas-extras-mes');
-    if (elHorasExtras) elHorasExtras.textContent = `+${formatarHM(totalMinutosExtras)}`;
-
-    const elAtrasos = document.getElementById('total-atrasos-mes');
-    if (elAtrasos) elAtrasos.textContent = `-${formatarHM(totalMinutosAtrasos)}`;
-
-    const saldoTotalMinutos = totalMinutosExtras - totalMinutosAtrasos;
-    const elSaldoHoras = document.getElementById('saldo-horas-mes');
-    if (elSaldoHoras) {
-      if (saldoTotalMinutos >= 0) {
-        elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-success';
-        elSaldoHoras.textContent = `+${formatarHM(saldoTotalMinutos)}`;
-      } else {
-        elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-danger';
-        elSaldoHoras.textContent = `-${formatarHM(Math.abs(saldoTotalMinutos))}`;
-      }
-    }
-
   } catch (err) {
     console.error('Erro ao gerar espelho:', err);
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-danger">Erro ao calcular: ${err.message}</td></tr>`;
+    if (containerFolhas) {
+      containerFolhas.innerHTML = `<div class="alert alert-danger py-4 text-center">Erro ao calcular espelho: ${err.message}</div>`;
+    }
   }
 }
 

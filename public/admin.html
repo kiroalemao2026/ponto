@@ -148,6 +148,9 @@
           <button class="btn btn-success" onclick="imprimirFolhaA4()">
             <i class="fas fa-print me-1"></i> Imprimir Folha A4 / Salvar PDF
           </button>
+          <button class="btn btn-primary" onclick="imprimirTodosA4()" title="Gera o espelho de ponto de todos os colaboradores do mês de uma só vez para imprimir ou salvar em PDF">
+            <i class="fas fa-users me-1"></i> Imprimir Todos de uma Vez
+          </button>
           <button class="btn btn-outline-secondary" onclick="gerarEspelho()">
             <i class="fas fa-sync-alt me-1"></i> Atualizar
           </button>
@@ -216,69 +219,9 @@
 
         <!-- DOCUMENTO OFICIAL A4: CABEÇALHO + TABELA + RESUMO + ASSINATURA -->
         <div id="folha-impressao-a4">
-          <!-- Cabeçalho Oficial do Documento -->
-          <div class="cabecalho-folha-oficial mb-2 p-2 border border-secondary rounded bg-dark">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-              <div>
-                <h5 class="fw-bold mb-0 text-light text-uppercase">Espelho de Ponto Individual de Trabalho</h5>
-                <span class="text-accent small fw-bold"><i class="fas fa-clock me-1"></i> Mobilittà — Sistema de Ponto Eletrônico</span>
-              </div>
-              <div class="text-end small text-muted">
-                <div>Período: <strong class="text-light" id="folha-periodo-str">--</strong></div>
-                <div>Emissão: <strong class="text-light" id="folha-data-emissao">--</strong></div>
-              </div>
-            </div>
-            <div class="border-top border-secondary my-1 pt-1 row g-2 small text-light">
-              <div class="col-4">Colaborador: <strong id="folha-func-nome">--</strong></div>
-              <div class="col-4">CPF: <strong id="folha-func-cpf">--</strong></div>
-              <div class="col-4">Cargo: <strong id="folha-func-cargo">--</strong></div>
-              <div class="col-4">Departamento: <strong id="folha-func-dep">--</strong></div>
-              <div class="col-8">Regime / Carga: <strong id="folha-func-jornada">--</strong></div>
-            </div>
-          </div>
-
-          <!-- Tabela Detalhada com Horas Extras e Saldos -->
-          <div class="table-responsive">
-            <table class="admin-table tabela-folha-a4">
-              <thead>
-                <tr>
-                  <th style="width: 13%;">Dia</th>
-                  <th style="width: 10%;">Entrada</th>
-                  <th style="width: 11%;">Saída Almoço</th>
-                  <th style="width: 11%;">Ret. Almoço</th>
-                  <th style="width: 10%;">Saída</th>
-                  <th style="width: 11%;">Total Trab.</th>
-                  <th style="width: 10%;">Carga</th>
-                  <th style="width: 11%;">H. Extras (+)</th>
-                  <th style="width: 10%;">Saldo Dia</th>
-                  <th style="width: 5%;" class="no-print text-center">Ajuste</th>
-                </tr>
-              </thead>
-              <tbody id="tabela-espelho-corpo">
-                <tr><td colspan="9" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando espelho de ponto...</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Termo de Declaração e Bloco de Assinatura para Conferência -->
-          <div class="bloco-assinaturas mt-3 pt-2 border-top border-secondary">
-            <p class="small text-muted text-center mb-4 fst-italic">
-              "Reconheço a exatidão das anotações constantes neste espelho de ponto referente ao período indicado, concordando com as horas normais, horas extras e saldos apurados."
-            </p>
-            <div class="row text-center g-4 pt-2">
-              <div class="col-6">
-                <div class="linha-assinatura" style="border-top: 1px solid #777; width: 85%; margin: 0 auto; padding-top: 6px;">
-                  <strong class="d-block text-light" id="assinatura-nome-func">Assinatura do Colaborador</strong>
-                  <span class="small text-muted">Data: _____ / _____ / ________</span>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="linha-assinatura" style="border-top: 1px solid #777; width: 85%; margin: 0 auto; padding-top: 6px;">
-                  <strong class="d-block text-light">Assinatura do Empregador / RH</strong>
-                  <span class="small text-muted">Data: _____ / _____ / ________</span>
-                </div>
-              </div>
-            </div>
+          <div class="text-center py-5 text-muted no-print">
+            <i class="fas fa-spinner fa-spin fa-2x mb-3 text-accent"></i>
+            <p>Carregando espelho de ponto...</p>
           </div>
         </div>
       </div>
