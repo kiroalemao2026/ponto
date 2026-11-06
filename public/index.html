@@ -6,7 +6,7 @@
   <title>Sistema de Ponto</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="/css/style.css?v=20261105_v4">
+  <link rel="stylesheet" href="/css/style.css?v=20261105_foto_v1">
 </head>
 <body>
 
@@ -14,7 +14,7 @@
 <div id="tela-carregando">
   <i class="fas fa-clock fa-3x text-accent"></i>
   <div class="spinner-border" role="status"></div>
-  <p id="msg-carregando">Carregando modelos de reconhecimento facial...</p>
+  <p id="msg-carregando">Iniciando sistema de ponto...</p>
 </div>
 
 <!-- ── Header ── -->
@@ -37,7 +37,7 @@
     <div id="overlay-processando">
       <div class="spinner-border text-accent mb-3" style="width: 3.8rem; height: 3.8rem; border-width: 4px;" role="status"></div>
       <h3 class="text-light fw-bold mb-2">Registrando ponto...</h3>
-      <p class="text-muted mb-0" style="font-size: 0.95rem;">Capturando foto e salvando no Firebase</p>
+      <p class="text-muted mb-0" style="font-size: 0.95rem;">Capturando foto e salvando no sistema</p>
     </div>
 
     <!-- Estado 2: Sucesso -->
@@ -46,7 +46,7 @@
         <i class="fas fa-check-circle text-success" style="font-size: 4rem;"></i>
       </div>
       <h3 class="text-success fw-bold mb-1">Ponto Registrado com Sucesso!</h3>
-      <h4 class="text-light fw-bold mb-1" id="overlay-nome">Bruno Antônio</h4>
+      <h4 class="text-light fw-bold mb-1" id="overlay-nome">Colaborador</h4>
       <div class="mb-3">
         <span class="badge bg-success fs-6 px-3 py-1" id="overlay-tipo">Entrada</span>
         <span class="text-muted ms-2" id="overlay-hora">00:00:00</span>
@@ -112,7 +112,7 @@
     </div>
   </div>
 
-  <!-- ETAPA 2: Câmera + Reconhecimento -->
+  <!-- ETAPA 2: Câmera + Foto -->
   <div id="etapa-camera" class="hidden w-100">
     <div class="d-flex flex-wrap gap-4 justify-content-center w-100">
 
@@ -135,20 +135,16 @@
 
         <div class="camera-wrapper">
           <video id="video" autoplay playsinline muted></video>
-          <div class="moldura-oval" id="moldura-oval"></div>
+          <div class="moldura-oval reconhecido" id="moldura-oval"></div>
           <canvas id="canvas-overlay" class="camera-overlay-canvas"></canvas>
           <div class="camera-status" id="camera-status">
             <i class="fas fa-spinner fa-spin"></i> Iniciando câmera...
           </div>
         </div>
 
-        <div id="status-face" class="text-center mt-2" style="font-size:.85rem; color:var(--text-muted)">
-          Posicione seu rosto no enquadramento
+        <div id="status-face" class="text-center mt-2 fw-semibold" style="font-size:.9rem; color:#28a745">
+          <i class="fas fa-camera me-1"></i>Posicione-se e toque no botão desejado
         </div>
-
-        <button type="button" class="btn btn-sm btn-outline-warning w-100 my-2 py-2 fw-bold" onclick="forcarLiberacaoComFoto()">
-          <i class="fas fa-camera me-1"></i> Câmera escura ou com ruído? Bater ponto com foto
-        </button>
 
         <!-- Botões de ponto -->
         <div class="botoes-ponto">
@@ -173,7 +169,7 @@
         </div>
       </div>
 
-      <!-- Lateral (Oculta na interface para tela focada e limpa) -->
+      <!-- Lateral -->
       <div class="lateral-col d-none">
         <div id="card-processando"></div>
         <div id="card-resultado">
@@ -209,9 +205,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
-<script src="/js/ponto.js?v=20261105_v4"></script>
+<script src="/js/ponto.js?v=20261105_foto_v1"></script>
 </body>
 </html>
