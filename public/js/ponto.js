@@ -257,6 +257,25 @@ async function iniciarCamera() {
 
     await video.play().catch(() => {});
 
+    // Aguarda o vídeo carregar dimensões e primeiro frame real
+    await new Promise(resolve => {
+      if (video.readyState >= 2 && video.videoWidth > 0) return resolve();
+      let resolvido = false;
+      const pronto = () => {
+        if (!resolvido && video.videoWidth > 0) {
+          resolvido = true;
+          video.removeEventListener('loadeddata', pronto);
+          video.removeEventListener('canplay', pronto);
+          video.removeEventListener('playing', pronto);
+          resolve();
+        }
+      };
+      video.addEventListener('loadeddata', pronto);
+      video.addEventListener('canplay', pronto);
+      video.addEventListener('playing', pronto);
+      setTimeout(pronto, 800);
+    });
+
     const labelCam = modoCameraAtual === 'user' ? 'Frontal' : 'Traseira';
     status.innerHTML = `<i class="fas fa-circle text-success"></i> Câmera ${labelCam} ativa`;
 
@@ -269,13 +288,12 @@ async function iniciarCamera() {
       statusFace.style.color = '#28a745';
     }
 
-    // Botões liberados imediatamente para o registro por foto
+    // Botões liberados com a câmera devidamente renderizando
     liberarBotoes(true);
 
   } catch (err) {
     console.error('Erro ao abrir câmera:', err);
     status.innerHTML = '<button onclick="iniciarCamera()" class="btn btn-sm btn-outline-danger" style="font-size:.75rem"><i class="fas fa-redo me-1"></i>Toque para ativar câmera</button>';
-    // Mesmo se a câmera demorar para responder, mantém os botões disponíveis
     liberarBotoes(true);
   }
 }
@@ -358,6 +376,115 @@ function fecharOverlay() {
   if (overlay) overlay.classList.add('d-none');
 }
 
+// ─── Verificação e Captura Confiável de Foto ────────────────
+function verificarFrameVerdeOuPreto(ctx, w, h) {
+  try {
+    const pontos = [
+      [Math.floor(w * 0.5), Math.floor(h * 0.5)],
+      [Math.floor(w * 0.25), Math.floor(h * 0.25)],
+      [Math.floor(w * 0.75), Math.floor(h * 0.25)],
+      [Math.floor(w * 0.25), Math.floor(h * 0.75)],
+      [Math.floor(w * 0.75), Math.floor(h * 0.75)],
+      [Math.floor(w * 0.5), Math.floor(h * 0.25)],
+      [Math.floor(w * 0.5), Math.floor(h * 0.75)]
+    ];
+    let falhas = 0;
+    for (const [x, y] of pontos) {
+      const p = ctx.getImageData(x, y, 1, 1).data;
+      // Bug de YUV (0,0,0) desempacotado em RGB resulta exatamente em R:0, G:135, B:0
+      const isYUVVerde = (p[0] <= 20 && p[1] >= 115 && p[1] <= 155 && p[2] <= 20);
+      const isPreto = (p[0] === 0 && p[1] === 0 && p[2] === 0);
+      if (isYUVVerde || isPreto) {
+        falhas++;
+      }
+    }
+    // Se a maioria das amostras for verde YUV corrompido ou preto total
+    return falhas >= 5;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function capturarFotoReal() {
+  const video = document.getElementById('video');
+
+  // Método 1: ImageCapture nativo do Android / Chrome (captura direta do hardware sem falhas YUV)
+  if (window.ImageCapture && streamCamera) {
+    try {
+      const tracks = streamCamera.getVideoTracks();
+      if (tracks && tracks.length > 0 && tracks[0].readyState === 'live') {
+        const imageCapture = new ImageCapture(tracks[0]);
+        const bitmap = await imageCapture.grabFrame();
+        if (bitmap && bitmap.width > 0 && bitmap.height > 0) {
+          const capCanvas = document.createElement('canvas');
+          const maxDim = 480;
+          const escala = Math.min(1, maxDim / bitmap.width);
+          capCanvas.width = Math.round(bitmap.width * escala);
+          capCanvas.height = Math.round(bitmap.height * escala);
+          const capCtx = capCanvas.getContext('2d', { willReadFrequently: true });
+
+          if (modoCameraAtual === 'user') {
+            capCtx.translate(capCanvas.width, 0);
+            capCtx.scale(-1, 1);
+          }
+          capCtx.drawImage(bitmap, 0, 0, capCanvas.width, capCanvas.height);
+
+          if (!verificarFrameVerdeOuPreto(capCtx, capCanvas.width, capCanvas.height)) {
+            const foto = capCanvas.toDataURL('image/jpeg', 0.85);
+            console.log('📸 Foto capturada via ImageCapture:', foto.length, 'bytes');
+            return foto;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('ImageCapture grabFrame falhou, tentando fallback canvas:', e);
+    }
+  }
+
+  // Método 2: Desenho nativo do elemento <video> com verificação anti-verde e retentativas
+  if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const maxDim = 480;
+    const escala = Math.min(1, maxDim / vw);
+    const targetW = Math.round(vw * escala);
+    const targetH = Math.round(vh * escala);
+
+    const capCanvas = document.createElement('canvas');
+    capCanvas.width = targetW;
+    capCanvas.height = targetH;
+    const capCtx = capCanvas.getContext('2d', { willReadFrequently: true });
+
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      capCtx.clearRect(0, 0, targetW, targetH);
+      capCtx.save();
+      if (modoCameraAtual === 'user') {
+        capCtx.translate(targetW, 0);
+        capCtx.scale(-1, 1);
+      }
+      capCtx.drawImage(video, 0, 0, targetW, targetH);
+      capCtx.restore();
+
+      if (!verificarFrameVerdeOuPreto(capCtx, targetW, targetH)) {
+        const foto = capCanvas.toDataURL('image/jpeg', 0.85);
+        console.log(`📸 Foto capturada via Canvas (tentativa ${tentativa}):`, foto.length, 'bytes');
+        return foto;
+      }
+
+      console.warn(`Tentativa ${tentativa}: Frame da câmera veio verde YUV(0,135,0). Aguardando próximo frame...`);
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  // Método 3: Fallback de segurança para foto de cadastro (garante que NUNCA fique verde)
+  if (funcionarioAtual && funcionarioAtual.fotoUrl) {
+    console.warn('⚠️ Usando foto cadastral do colaborador pois a câmera não produziu frame válido.');
+    return funcionarioAtual.fotoUrl;
+  }
+
+  return '';
+}
+
 // ─── Registrar Ponto (Foto + Firestore) ──────────────────
 async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
@@ -368,22 +495,9 @@ async function registrarPonto(tipo) {
   // Abre na tela o modal destacado "Registrando ponto..."
   abrirOverlayProcessando();
 
-  const video = document.getElementById('video');
-  let fotoSnapshot = null;
-
   try {
-    // 1. Tira foto instantânea da câmera no momento do clique
-    const capCanvas = document.createElement('canvas');
-    capCanvas.width = 320;
-    capCanvas.height = 240;
-    const capCtx = capCanvas.getContext('2d');
-
-    if (video && video.videoWidth) {
-      capCtx.drawImage(video, 0, 0, 320, 240);
-      fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.8);
-    } else if (funcionarioAtual.fotoUrl) {
-      fotoSnapshot = funcionarioAtual.fotoUrl;
-    }
+    // 1. Tira foto real instantânea da câmera com tripla proteção
+    const fotoSnapshot = await capturarFotoReal();
 
     const agora = firebase.firestore.Timestamp.now();
     const hoje = new Date();

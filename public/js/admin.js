@@ -1,1628 +1,1633 @@
-// ============================================================
-//  admin.js — Lógica do Painel de Administração
-//  Firebase Firestore + face-api.js
-// ============================================================
-
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBCuPyOvWhv0MVz6S-Cd8bFDgBcyF1ZCY4",
-  authDomain: "ponto-mobilitta.firebaseapp.com",
-  projectId: "ponto-mobilitta",
-  storageBucket: "ponto-mobilitta.firebasestorage.app",
-  messagingSenderId: "217323535686",
-  appId: "1:217323535686:web:6c583a7ba09d64594db947"
-};
-
-const TIPOS_LABEL = {
-  entrada: "Entrada",
-  almoco_saida: "Saída Almoço",
-  almoco_retorno: "Retorno Almoço",
-  saida_extra: "Saída Extra",
-  retorno_extra: "Retorno Extra",
-  saida: "Saída"
-};
-
-let db, auth;
-let streamAdminCam = null;
-let listaFuncionariosCache = [];
-let listaRegistrosCache = [];
-let modalFuncInstancia = null;
-let modalFotoInstancia = null;
-let modalAjusteDiaInstancia = null;
-let modalAtestadoInstancia = null;
-let modalPontoManualInstancia = null;
-let listaAtestadosCache = [];
-
-function extrairData(ts) {
-  if (!ts) return null;
-  if (ts.toDate && typeof ts.toDate === 'function') return ts.toDate();
-  if (ts.seconds) return new Date(ts.seconds * 1000);
-  if (typeof ts === 'string') return new Date(ts);
-  if (ts instanceof Date) return ts;
-  return null;
-}
-
-// ─── Inicialização ────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  // Verifica autenticação simples
-  if (!sessionStorage.getItem('admin_logado')) {
-    window.location.href = '/login.html';
-    return;
-  }
-
-  firebase.initializeApp(FIREBASE_CONFIG);
-  db = firebase.firestore();
-  auth = firebase.auth();
-
-  modalFuncInstancia = new bootstrap.Modal(document.getElementById('modal-func'));
-  modalFotoInstancia = new bootstrap.Modal(document.getElementById('modal-foto'));
-  const elModalAjuste = document.getElementById('modal-ajuste-dia');
-  if (elModalAjuste) modalAjusteDiaInstancia = new bootstrap.Modal(elModalAjuste);
-  const elModalAtestado = document.getElementById('modal-atestado');
-  if (elModalAtestado) modalAtestadoInstancia = new bootstrap.Modal(elModalAtestado);
-  const elModalManual = document.getElementById('modal-ponto-manual');
-  if (elModalManual) modalPontoManualInstancia = new bootstrap.Modal(elModalManual);
-
-  // Data atual
-  const agora = new Date();
-  document.getElementById('dash-data-atual').textContent = agora.toLocaleDateString('pt-BR', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
-  });
-
-  const mesAtualInput = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
-  document.getElementById('select-relatorio-mes').value = mesAtualInput;
-
-  // Carrega modelos face-api em segundo plano
-  try {
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/models')
-    ]);
-  } catch (e) {
-    console.warn('Erro ao carregar modelos locais, tentando CDN:', e);
-    try {
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'),
-        faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'),
-        faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights')
-      ]);
-    } catch (err) {
-      console.error('Falha geral ao carregar modelos face-api:', err);
-    }
-  }
-
-  // Carrega dados iniciais
-  carregarDadosGerais();
-});
-
-// ─── Navegação entre Abas ─────────────────────────────
-function navegarAba(aba, el) {
-  document.querySelectorAll('.aba-secao').forEach(sec => sec.classList.add('d-none'));
-  document.querySelectorAll('.nav-item-link').forEach(link => link.classList.remove('ativo'));
-
-  const sec = document.getElementById(`aba-${aba}`);
-  if (sec) sec.classList.remove('d-none');
-  if (el) el.classList.add('ativo');
-
-  if (aba === 'dashboard') carregarDadosGerais();
-  if (aba === 'funcionarios') carregarFuncionarios();
-  if (aba === 'relatorios') carregarOpcoesRelatorio();
-  if (aba === 'atestados') carregarAtestados();
-}
-
-function fazerLogout() {
-  sessionStorage.removeItem('admin_logado');
-  sessionStorage.removeItem('admin_email');
-  if (auth) auth.signOut();
-  window.location.href = '/login.html';
-}
-
-// ─── Dashboard & Métricas ─────────────────────────────
-async function carregarDadosGerais() {
-  try {
-    // 1. Total funcionários
-    const snapFunc = await db.collection('funcionarios').get();
-    listaFuncionariosCache = snapFunc.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    const totalAtivos = listaFuncionariosCache.filter(f => f.ativo !== false).length;
-    const elTotalFunc = document.getElementById('dash-total-func');
-    if (elTotalFunc) elTotalFunc.textContent = totalAtivos;
-
-    // 2. Todos os Registros do Firestore (sem exigência de índice)
-    const snapReg = await db.collection('registros').get();
-    let todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    // Ordena do mais recente para o mais antigo em memória
-    todosRegistros.sort((a, b) => {
-      const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
-      const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
-      return tb - ta;
-    });
-
-    const inicioHoje = new Date();
-    inicioHoje.setHours(0, 0, 0, 0);
-    const inicioHojeMs = inicioHoje.getTime();
-
-    const registrosHoje = todosRegistros.filter(r => {
-      const dt = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
-      return dt >= inicioHojeMs;
-    });
-
-    const elBatidasHoje = document.getElementById('dash-batidas-hoje');
-    if (elBatidasHoje) elBatidasHoje.textContent = registrosHoje.length;
-
-    // Presentes (que bateram entrada hoje)
-    const cpfsPresentes = new Set(registrosHoje.filter(r => r.tipo === 'entrada').map(r => r.cpf));
-    const elPresentes = document.getElementById('dash-presentes');
-    if (elPresentes) elPresentes.textContent = cpfsPresentes.size;
-    const elAusentes = document.getElementById('dash-ausentes');
-    if (elAusentes) elAusentes.textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
-
-    // 3. Colaboradores com Registro Hoje (Agrupado com clique para expandir pontos)
-    const containerDash = document.getElementById('lista-colaboradores-dash');
-    const badgeTotalColabs = document.getElementById('dash-badge-total-colabs');
-
-    const registrosParaExibir = registrosHoje.length > 0 ? registrosHoje : todosRegistros;
-
-    if (registrosParaExibir.length === 0) {
-      if (containerDash) {
-        containerDash.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-inbox fs-2 mb-2 d-block"></i>Nenhum ponto registrado hoje ainda.</div>';
-      }
-      if (badgeTotalColabs) badgeTotalColabs.textContent = '0 colaboradores';
-      return;
-    }
-
-    // Agrupa os registros por funcionário (CPF)
-    const mapaColabs = new Map();
-    registrosParaExibir.forEach(r => {
-      const cleanCpf = (r.cpf || '').replace(/\D/g, '');
-      if (!cleanCpf) return;
-      if (!mapaColabs.has(cleanCpf)) {
-        const fInfo = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
-        mapaColabs.set(cleanCpf, {
-          cpf: cleanCpf,
-          nome: r.funcionarioNome || fInfo?.nome || 'Colaborador',
-          cargo: fInfo?.cargo || r.cargo || '',
-          departamento: fInfo?.departamento || r.departamento || '',
-          fotoPerfil: fInfo?.fotoBase64 || r.fotoSnapshot || '',
-          registros: []
-        });
-      }
-      mapaColabs.get(cleanCpf).registros.push(r);
-    });
-
-    const listaAgrupada = Array.from(mapaColabs.values());
-    if (badgeTotalColabs) {
-      badgeTotalColabs.textContent = `${listaAgrupada.length} colaborador${listaAgrupada.length === 1 ? '' : 'es'}`;
-    }
-
-    if (containerDash) {
-      containerDash.innerHTML = listaAgrupada.map(colab => {
-        // Ordena registros do mais recente para o mais antigo
-        const regs = colab.registros.sort((a, b) => {
-          const ta = extrairData(a.timestamp)?.getTime() || 0;
-          const tb = extrairData(b.timestamp)?.getTime() || 0;
-          return tb - ta;
-        });
-
-        const ultimo = regs[0];
-        const dtUltimo = extrairData(ultimo.timestamp);
-        const horaUltimo = dtUltimo ? dtUltimo.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '--:--';
-        const fotoPerfil = colab.fotoPerfil || ultimo.fotoSnapshot || '';
-
-        const fotoTag = fotoPerfil 
-          ? `<img src="${fotoPerfil}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);cursor:pointer;" onclick="verFotoAmpliada('${fotoPerfil}', '${colab.nome}')">`
-          : `<div style="width:48px;height:48px;border-radius:50%;background:#222;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:bold;font-size:1.2rem;">${colab.nome.charAt(0)}</div>`;
-
-        const linhasPontos = regs.map(reg => {
-          const dt = extrairData(reg.timestamp);
-          const dataHoraStr = dt ? dt.toLocaleString('pt-BR') : '--';
-          const horaStr = dt ? dt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
-          const fotoReg = reg.fotoSnapshot || '';
-
-          return `
-            <tr>
-              <td class="text-light fw-bold">
-                <i class="fas fa-clock text-accent me-1"></i> ${horaStr} 
-                <small class="text-muted">(${dt ? dt.toLocaleDateString('pt-BR') : ''})</small>
-                ${reg.ajusteManual ? `<span class="badge bg-warning text-dark ms-1" title="${reg.justificativa || 'Ajuste Manual'}"><i class="fas fa-edit me-1"></i>Manual</span>` : ''}
-              </td>
-              <td><span class="badge-tipo badge-${reg.tipo}">${TIPOS_LABEL[reg.tipo] || reg.tipo}</span></td>
-              <td><span class="text-light"><i class="fas fa-fingerprint text-accent me-1"></i> ${reg.confianca || 92}%</span></td>
-              <td>
-                ${fotoReg 
-                  ? `<img src="${fotoReg}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;cursor:pointer;border:1px solid #555;" onclick="verFotoAmpliada('${fotoReg}', '${colab.nome} - ${dataHoraStr}')">`
-                  : '<span class="text-muted small">Sem foto</span>'}
-              </td>
-              <td class="text-end">
-                <button class="btn btn-sm btn-outline-danger p-1" onclick="excluirRegistroPonto('${reg.id}', '${colab.nome}', '${horaStr}', event)" title="Excluir esta batida"><i class="fas fa-trash-alt"></i></button>
-              </td>
-            </tr>
-          `;
-        }).join('');
-
-        return `
-          <div class="border border-secondary rounded-3 bg-dark p-3" style="cursor: pointer;" onclick="togglePontosDash('${colab.cpf}', event)">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-              <div class="d-flex align-items-center gap-3">
-                ${fotoTag}
-                <div>
-                  <h6 class="fw-bold text-light mb-0 fs-5">${colab.nome}</h6>
-                  <div class="text-muted small">${colab.cargo || 'Funcionário'} ${colab.departamento ? '· ' + colab.departamento : ''} · CPF: ${formatarCPF(colab.cpf)}</div>
-                </div>
-              </div>
-
-              <div class="d-flex align-items-center gap-3">
-                <div class="text-end">
-                  <span class="badge fs-6" style="background:var(--accent);color:#fff;font-weight:700;">${regs.length} batida${regs.length === 1 ? '' : 's'}</span>
-                  <div class="small text-muted mt-1">Último: <span class="badge-tipo badge-${ultimo.tipo}">${TIPOS_LABEL[ultimo.tipo] || ultimo.tipo} às ${horaUltimo}</span></div>
-                </div>
-                <div class="p-2 rounded-circle border border-accent border-opacity-50 text-accent d-flex align-items-center justify-content-center" style="width:36px;height:36px;background:rgba(255,107,0,0.12);">
-                  <i class="fas fa-chevron-down fs-6" id="icone-dash-${colab.cpf}"></i>
-                </div>
-              </div>
-            </div>
-
-            <!-- GAVETA EXPANSÍVEL COM TODOS OS PONTOS (ABRE AO CLICAR NO COLABORADOR) -->
-            <div id="gaveta-dash-${colab.cpf}" class="d-none mt-3 pt-3 border-top border-secondary">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <span class="text-muted small fw-bold text-uppercase"><i class="fas fa-history text-accent me-1"></i> Histórico de Batidas de ${colab.nome}:</span>
-                <span class="small text-muted">Clique na foto para ampliar</span>
-              </div>
-              <div class="table-responsive">
-                <table class="table table-dark table-sm table-hover mb-0 align-middle">
-                  <thead>
-                    <tr class="text-muted small">
-                      <th>Horário</th>
-                      <th>Tipo do Ponto</th>
-                      <th>Biometria Facial</th>
-                      <th>Foto</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${linhasPontos}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-  } catch (err) {
-    console.error('Erro ao carregar dados gerais:', err);
-  }
-}
-
-function togglePontosDash(cpf, event) {
-  // Evita conflito se clicar diretamente na foto para abrir o modal de zoom
-  if (event && event.target && event.target.tagName === 'IMG') return;
-
-  const gaveta = document.getElementById(`gaveta-dash-${cpf}`);
-  const icone = document.getElementById(`icone-dash-${cpf}`);
-  if (gaveta) {
-    const estaFechado = gaveta.classList.contains('d-none');
-    if (estaFechado) {
-      gaveta.classList.remove('d-none');
-      if (icone) {
-        icone.classList.remove('fa-chevron-down');
-        icone.classList.add('fa-chevron-up');
-      }
-    } else {
-      gaveta.classList.add('d-none');
-      if (icone) {
-        icone.classList.remove('fa-chevron-up');
-        icone.classList.add('fa-chevron-down');
-      }
-    }
-  }
-}
-
-// ─── Gestão de Funcionários ───────────────────────────
-async function carregarFuncionarios() {
-  const tbody = document.getElementById('tabela-funcionarios');
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando colaboradores...</td></tr>';
-
-  try {
-    const snap = await db.collection('funcionarios').get();
-    listaFuncionariosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    renderizarTabelaFuncionarios(listaFuncionariosCache);
-  } catch (err) {
-    console.error('Erro ao listar funcionários:', err);
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Erro ao carregar do Firestore: ${err.message}</td></tr>`;
-  }
-}
-
-function renderizarTabelaFuncionarios(lista) {
-  const tbody = document.getElementById('tabela-funcionarios');
-  if (lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Nenhum funcionário cadastrado.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = lista.map(f => {
-    const temBiometria = f.faceDescriptor && f.faceDescriptor.length > 0;
-    const ativo = f.ativo !== false;
-    const foto = f.fotoUrl || '';
-
-    return `
-      <tr>
-        <td>
-          ${foto 
-            ? `<img src="${foto}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="verFotoAmpliada('${foto}', '${f.nome}')">`
-            : '<div style="width:40px;height:40px;border-radius:50%;background:#222;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><i class="fas fa-user text-muted"></i></div>'}
-        </td>
-        <td><strong class="text-light">${f.nome}</strong></td>
-        <td><code>${formatarCPF(f.cpf || '')}</code></td>
-        <td>${f.cargo || '-'} <small class="text-muted">${f.departamento ? '· ' + f.departamento : ''}</small></td>
-        <td>
-          ${temBiometria 
-            ? '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Ativa (128D)</span>' 
-            : '<span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Pendente</span>'}
-        </td>
-        <td>
-          <span class="badge ${ativo ? 'bg-primary' : 'bg-secondary'}">${ativo ? 'Ativo' : 'Inativo'}</span>
-        </td>
-        <td>
-          <button class="btn btn-sm btn-outline-light me-1" onclick="editarFuncionario('${f.id}')" title="Editar">
-            <i class="fas fa-edit"></i>
-          </button>
-          <button class="btn btn-sm btn-outline-danger" onclick="excluirFuncionario('${f.id}', '${f.nome}')" title="Excluir">
-            <i class="fas fa-trash-alt"></i>
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-function filtrarFuncionarios() {
-  const termo = document.getElementById('filtro-func-busca').value.toLowerCase().replace(/\D/g, '') || document.getElementById('filtro-func-busca').value.toLowerCase();
-  const filtrados = listaFuncionariosCache.filter(f => {
-    const nomeMatch = (f.nome || '').toLowerCase().includes(termo);
-    const cpfMatch = (f.cpf || '').includes(termo);
-    return nomeMatch || cpfMatch;
-  });
-  renderizarTabelaFuncionarios(filtrados);
-}
-
-// ─── Modal de Funcionário (Cadastrar / Editar) ─────────
-function abrirModalFuncionario() {
-  document.getElementById('form-salvar-func').reset();
-  document.getElementById('func-id').value = '';
-  document.getElementById('func-foto-base64').value = '';
-  document.getElementById('func-face-descriptor').value = '';
-  document.getElementById('modal-func-titulo').innerHTML = '<i class="fas fa-user-plus text-accent me-2"></i>Cadastrar Colaborador';
-  document.getElementById('img-preview-func').style.display = 'none';
-  document.getElementById('status-biometria').innerHTML = 'Nenhuma biometria cadastrada ainda.';
-  document.getElementById('status-biometria').className = 'small text-muted';
-  fecharCameraAdmin();
-
-  modalFuncInstancia.show();
-}
-
-function editarFuncionario(id) {
-  const f = listaFuncionariosCache.find(item => item.id === id);
-  if (!f) return;
-
-  document.getElementById('func-id').value = f.id;
-  document.getElementById('func-nome').value = f.nome || '';
-  document.getElementById('func-cpf').value = formatarCPF(f.cpf || '');
-  document.getElementById('func-cargo').value = f.cargo || '';
-  document.getElementById('func-departamento').value = f.departamento || '';
-  document.getElementById('func-email').value = f.email || '';
-  document.getElementById('func-ativo').value = f.ativo !== false ? 'true' : 'false';
-
-  document.getElementById('func-foto-base64').value = f.fotoUrl || '';
-  document.getElementById('func-face-descriptor').value = f.faceDescriptor ? JSON.stringify(f.faceDescriptor) : '';
-
-  const img = document.getElementById('img-preview-func');
-  if (f.fotoUrl) {
-    img.src = f.fotoUrl;
-    img.style.display = 'block';
-  } else {
-    img.style.display = 'none';
-  }
-
-  if (f.faceDescriptor && f.faceDescriptor.length > 0) {
-    document.getElementById('status-biometria').innerHTML = '<i class="fas fa-check-circle text-success me-1"></i>Biometria cadastrada e válida.';
-    document.getElementById('status-biometria').className = 'small text-success';
-  } else {
-    document.getElementById('status-biometria').innerHTML = 'Biometria pendente. Capture uma nova foto.';
-    document.getElementById('status-biometria').className = 'small text-warning';
-  }
-
-  document.getElementById('modal-func-titulo').innerHTML = '<i class="fas fa-user-edit text-accent me-2"></i>Editar Colaborador';
-  fecharCameraAdmin();
-  modalFuncInstancia.show();
-}
-
-// Câmera ao vivo dentro do Modal Admin
-async function iniciarCameraAdmin() {
-  const wrapper = document.getElementById('wrapper-cam-admin');
-  const video = document.getElementById('video-cam-admin');
-  wrapper.classList.remove('d-none');
-
-  try {
-    streamAdminCam = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240, facingMode: 'user' },
-      audio: false
-    });
-    video.srcObject = streamAdminCam;
-    await video.play();
-  } catch (err) {
-    alert('Não foi possível acessar a câmera: ' + err.message);
-  }
-}
-
-function fecharCameraAdmin() {
-  if (streamAdminCam) {
-    streamAdminCam.getTracks().forEach(t => t.stop());
-    streamAdminCam = null;
-  }
-  const wrapper = document.getElementById('wrapper-cam-admin');
-  if (wrapper) wrapper.classList.add('d-none');
-}
-
-async function capturarFotoCamAdmin() {
-  const video = document.getElementById('video-cam-admin');
-  if (!video.videoWidth) return;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-
-  const fotoBase64 = canvas.toDataURL('image/jpeg', 0.85);
-  fecharCameraAdmin();
-
-  await processarFotoBiometria(fotoBase64);
-}
-
-function carregarFotoArquivo(input) {
-  if (!input.files || !input.files[0]) return;
-  const file = input.files[0];
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    await processarFotoBiometria(e.target.result);
-  };
-  reader.readAsDataURL(file);
-}
-
-async function processarFotoBiometria(fotoBase64) {
-  const statusEl = document.getElementById('status-biometria');
-  const spinner = document.getElementById('spinner-biometria');
-  const previewImg = document.getElementById('img-preview-func');
-
-  previewImg.src = fotoBase64;
-  previewImg.style.display = 'block';
-
-  statusEl.textContent = 'Processando rede neural facial...';
-  statusEl.className = 'small text-info';
-  spinner.classList.remove('d-none');
-
-  try {
-    const imgElement = await faceapi.fetchImage(fotoBase64);
-    const deteccao = await faceapi
-      .detectSingleFace(imgElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-
-    spinner.classList.add('d-none');
-
-    if (!deteccao) {
-      statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-danger me-1"></i>Nenhum rosto detectado na foto. Tente outra com melhor iluminação.';
-      statusEl.className = 'small text-danger';
-      document.getElementById('func-face-descriptor').value = '';
-      return;
-    }
-
-    // Vetor de 128 dimensões
-    const descriptorArray = Array.from(deteccao.descriptor);
-    document.getElementById('func-foto-base64').value = fotoBase64;
-    document.getElementById('func-face-descriptor').value = JSON.stringify(descriptorArray);
-
-    statusEl.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i>Rosto detectado com sucesso! Biometria neural 128D gerada.';
-    statusEl.className = 'small text-success';
-
-  } catch (err) {
-    spinner.classList.add('d-none');
-    console.error('Erro na extração facial:', err);
-    statusEl.innerHTML = '<i class="fas fa-times-circle text-danger me-1"></i>Erro ao gerar biometria: ' + err.message;
-    statusEl.className = 'small text-danger';
-  }
-}
-
-// Salvar no Firestore
-async function salvarFuncionario(e) {
-  e.preventDefault();
-
-  const id = document.getElementById('func-id').value;
-  const nome = document.getElementById('func-nome').value.trim();
-  const cpfLimpo = document.getElementById('func-cpf').value.replace(/\D/g, '');
-  const cargo = document.getElementById('func-cargo').value.trim();
-  const departamento = document.getElementById('func-departamento').value.trim();
-  const email = document.getElementById('func-email').value.trim();
-  const ativo = document.getElementById('func-ativo').value === 'true';
-
-  const fotoUrl = document.getElementById('func-foto-base64').value;
-  const descriptorStr = document.getElementById('func-face-descriptor').value;
-  let faceDescriptor = null;
-
-  if (descriptorStr) {
-    try {
-      faceDescriptor = JSON.parse(descriptorStr);
-    } catch (_) {}
-  }
-
-  if (cpfLimpo.length !== 11) {
-    alert('O CPF deve ter exatamente 11 dígitos.');
-    return;
-  }
-
-  const btn = document.getElementById('btn-salvar-modal');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Salvando no Firebase...';
-
-  try {
-    const dados = {
-      nome: nome,
-      cpf: cpfLimpo,
-      cargo: cargo,
-      departamento: departamento,
-      email: email,
-      ativo: ativo
-    };
-
-    if (fotoUrl) dados.fotoUrl = fotoUrl;
-    if (faceDescriptor) dados.faceDescriptor = faceDescriptor;
-
-    if (id) {
-      // Atualizar existente
-      dados.dataAtualizacao = Date.now();
-      await db.collection('funcionarios').doc(id).update(dados);
-    } else {
-      // Criar novo
-      dados.dataCadastro = Date.now();
-      await db.collection('funcionarios').add(dados);
-    }
-
-    fecharCameraAdmin();
-    modalFuncInstancia.hide();
-    carregarFuncionarios();
-    alert('Colaborador salvo com sucesso no Firestore!');
-
-  } catch (err) {
-    console.error('Erro ao salvar funcionário:', err);
-    alert('Erro ao salvar no Firestore: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save me-1"></i> Salvar Colaborador';
-  }
-}
-
-async function excluirFuncionario(id, nome) {
-  if (!confirm(`Deseja realmente EXCLUIR o colaborador "${nome}" do sistema?\n\nEsta ação removerá o cadastro e a biometria facial definitivamente.`)) {
-    return;
-  }
-
-  try {
-    await db.collection('funcionarios').doc(id).delete();
-    // Remove do cache imediatamente
-    listaFuncionariosCache = listaFuncionariosCache.filter(f => f.id !== id);
-    
-    // Recarrega as tabelas e métricas
-    await carregarFuncionarios();
-    await carregarDadosGerais();
-    alert(`Colaborador "${nome}" excluído com sucesso!`);
-  } catch (err) {
-    console.error('Erro ao excluir funcionário:', err);
-    alert('Erro ao excluir colaborador: ' + err.message);
-  }
-}
-
-// ─── Exportação de Registros (CSV) ────────────────────
-async function exportarCSV() {
-  try {
-    let registros = listaRegistrosCache;
-    if (!registros || registros.length === 0) {
-      const snap = await db.collection('registros').get();
-      registros = snap.docs.map(d => d.data());
-    }
-
-    if (!registros || registros.length === 0) {
-      alert('Nenhum registro encontrado para exportar.');
-      return;
-    }
-
-    // Ordena do mais recente para o mais antigo
-    registros.sort((a, b) => {
-      const ta = extrairData(a.timestamp)?.getTime() || 0;
-      const tb = extrairData(b.timestamp)?.getTime() || 0;
-      return tb - ta;
-    });
-
-    let csv = 'Data/Hora,Nome,CPF,Tipo,Confianca\n';
-    registros.forEach(r => {
-      const dt = extrairData(r.timestamp);
-      const dataHora = dt ? dt.toLocaleString('pt-BR') : '';
-      csv += `"${dataHora}","${r.funcionarioNome || ''}","${formatarCPF(r.cpf || '')}","${TIPOS_LABEL[r.tipo] || r.tipo}","${r.confianca || 95}%"\n`;
-    });
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `registros_ponto_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.click();
-  } catch (err) {
-    console.error('Erro ao exportar CSV:', err);
-    alert('Erro ao exportar: ' + err.message);
-  }
-}
-
-// ─── Espelho de Ponto & Horas Extras ───────────────────
-function formatarHM(min, mostrarSinal = false) {
-  if (min === 0) return '0h 00m';
-  const sinal = min < 0 ? '-' : (mostrarSinal ? '+' : '');
-  const abs = Math.abs(min);
-  const h = Math.floor(abs / 60);
-  const m = abs % 60;
-  return `${sinal}${h}h ${String(m).padStart(2, '0')}m`;
-}
-
-function imprimirFolhaA4() {
-  window.print();
-}
-
-async function imprimirTodosA4() {
-  const selectFunc = document.getElementById('select-relatorio-func');
-  if (selectFunc) {
-    selectFunc.value = 'TODOS';
-  }
-  await gerarEspelho();
-  // Aguarda 350ms para garantir renderização do DOM antes de abrir o diálogo do navegador
-  setTimeout(() => {
-    window.print();
-  }, 350);
-}
-
-async function carregarOpcoesRelatorio() {
-  const select = document.getElementById('select-relatorio-func');
-  const inputMes = document.getElementById('select-relatorio-mes');
-  if (inputMes && !inputMes.value) {
-    const agora = new Date();
-    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  if (listaFuncionariosCache.length === 0) {
-    const snap = await db.collection('funcionarios').get();
-    listaFuncionariosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  }
-
-  if (listaFuncionariosCache.length === 0) {
-    select.innerHTML = '<option value="">Nenhum colaborador cadastrado</option>';
-    return;
-  }
-
-  const opcoesColaboradores = listaFuncionariosCache.map(f => 
-    `<option value="${f.cpf}">${f.nome} (CPF: ${formatarCPF(f.cpf)})</option>`
-  ).join('');
-
-  select.innerHTML = `
-    <option value="TODOS">📋 Todos os Colaboradores (Folha de Todos)</option>
-    ${opcoesColaboradores}
-  `;
-
-  // Seleciona automaticamente o primeiro colaborador por padrão para visualização rápida
-  if (!select.value || select.value === 'TODOS') {
-    select.value = listaFuncionariosCache[0].cpf;
-  }
-  await gerarEspelho();
-}
-
-// ─── Motor de Cálculo de Espelho por Colaborador ────────────────────────
-function calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados) {
-  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
-  const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
-  const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
-  const diasMes = dataFim.getDate();
-  const tInicioMs = dataInicio.getTime();
-  const tFimMs = dataFim.getTime();
-
-  const registros = todosRegistros.filter(r => {
-    const rCpf = (r.cpf || '').replace(/\D/g, '');
-    const dt = extrairData(r.timestamp)?.getTime() || 0;
-    return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
-  });
-
-  const atestadosFunc = todosAtestados.filter(a => {
-    const aCpf = (a.cpf || '').replace(/\D/g, '');
-    return aCpf === cleanCpf;
-  });
-
-  let linhasHtml = '';
-  let totalMinutosTrabalhados = 0;
-  let totalMinutosPrevistos = 0;
-  let totalMinutosExtras = 0;
-  let totalMinutosAtrasos = 0;
-  let diasTrabalhados = 0;
-
-  for (let dia = 1; dia <= diasMes; dia++) {
-    const dataDia = new Date(ano, mes - 1, dia);
-    const diaFormatado = String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0');
-    const diaSemana = dataDia.getDay(); // 0 = Dom, 6 = Sáb
-    const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][diaSemana];
-    const isFimDeSemana = diaSemana === 0 || diaSemana === 6;
-
-    // Carga horária prevista do dia em minutos
-    let minutosPrevistos = 0;
-    if (jornadaTipo === '8h_seg_sex') {
-      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : 0;
-    } else if (jornadaTipo === '8h_seg_sex_4h_sab') {
-      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : (diaSemana === 6 ? 240 : 0);
-    } else if (jornadaTipo === '6h_diarias') {
-      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 360 : 0;
-    }
-    totalMinutosPrevistos += minutosPrevistos;
-
-    const regsDia = registros.filter(r => {
-      const dt = extrairData(r.timestamp);
-      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
-    });
-
-    const regEntrada = regsDia.find(r => r.tipo === 'entrada');
-    const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
-    const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
-    const regSaida = regsDia.find(r => r.tipo === 'saida');
-    const regsSaidaExtra = regsDia.filter(r => r.tipo === 'saida_extra');
-    const regsRetornoExtra = regsDia.filter(r => r.tipo === 'retorno_extra');
-
-    const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-    const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-    const almocoRetorno = regAlmocoRetorno ? extrairData(regAlmocoRetorno.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-    const saida = regSaida ? extrairData(regSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
-
-    // Cálculo de minutos trabalhados
-    let minutosDia = 0;
-    const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
-
-    let minutosExtrasFora = 0;
-    let infoExtraTexto = '';
-    regsSaidaExtra.forEach((se, idx) => {
-      const re = regsRetornoExtra[idx];
-      const hSe = extrairData(se.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '';
-      const hRe = re ? extrairData(re.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : 'em aberto';
-      if (re) {
-        const fora = Math.max(0, Math.round((getMs(re) - getMs(se)) / 60000));
-        minutosExtrasFora += fora;
-      }
-      infoExtraTexto += `${infoExtraTexto ? ', ' : ''}${hSe} às ${hRe}`;
-    });
-
-    if (regEntrada && regSaida) {
-      if (regAlmocoSaida && regAlmocoRetorno) {
-        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
-                     Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
-      } else {
-        minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
-      }
-      minutosDia = Math.max(0, minutosDia - minutosExtrasFora);
-    } else if (regEntrada && regAlmocoSaida && !regSaida) {
-      minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
-    }
-
-    // Verifica se há atestado neste dia
-    const dataDiaStr = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-    const atestadoDoDia = atestadosFunc.find(a => {
-      const ini = a.dataInicio || '';
-      const fim = a.dataFim || a.dataInicio || '';
-      return dataDiaStr >= ini && dataDiaStr <= fim;
-    });
-
-    let extrasDia = 0;
-    let atrasoDia = 0;
-
-    if (atestadoDoDia) {
-      atrasoDia = 0;
-      if (minutosDia > 0) {
-        diasTrabalhados++;
-        totalMinutosTrabalhados += minutosDia;
-        if (minutosDia > minutosPrevistos) {
-          extrasDia = minutosDia - minutosPrevistos;
-        }
-      }
-    } else if (regsDia.length > 0) {
-      diasTrabalhados++;
-      totalMinutosTrabalhados += minutosDia;
-
-      if (minutosPrevistos === 0) {
-        extrasDia = minutosDia;
-      } else {
-        if (minutosDia > minutosPrevistos) {
-          extrasDia = minutosDia - minutosPrevistos;
-        } else if (minutosDia < minutosPrevistos && regSaida) {
-          atrasoDia = minutosPrevistos - minutosDia;
-        }
-      }
-    }
-
-    totalMinutosExtras += extrasDia;
-    totalMinutosAtrasos += atrasoDia;
-
-    let totalTrabStr = '<span class="ponto-vazio">-</span>';
-    if (minutosDia > 0) {
-      totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
-    } else if (regsDia.length > 0) {
-      totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
-    }
-
-    const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="dia-semana-label">Folga</span>';
-    const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="ponto-vazio">-</span>';
-    
-    let saldoDiaStr = '<span class="ponto-vazio">-</span>';
-    if (extrasDia > 0) {
-      saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
-    } else if (atrasoDia > 0) {
-      saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
-    } else if (minutosDia > 0) {
-      saldoDiaStr = `<span class="dia-semana-label">0h 00m</span>`;
-    }
-
-    const extraTag = infoExtraTexto 
-      ? `<div class="tag-saida-extra no-print"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
-      : '';
-
-    let entradaCol = entrada;
-    let almocoSaidaCol = almocoSaida;
-    let almocoRetornoCol = almocoRetorno;
-    let saidaCol = saida;
-    let atestadoTag = '';
-
-    if (atestadoDoDia) {
-      atestadoTag = `<div class="small text-truncate mt-1" style="font-size:0.68rem;color:#f59e0b;"><i class="fas fa-file-medical me-1"></i>${atestadoDoDia.tipo || 'Atestado'}</div>`;
-      if (minutosDia === 0 && regsDia.length === 0) {
-        totalTrabStr = `<span class="badge border border-warning text-warning" style="background:rgba(245,158,11,0.12);font-size:0.72rem;">Abonado (${cargaStr})</span>`;
-        saldoDiaStr = `<span class="text-warning fw-bold small">Abonado</span>`;
-      }
-    }
-
-    linhasHtml += `
-      <tr class="${isFimDeSemana ? 'fim-de-semana' : ''}">
-        <td><strong class="folha-valor-destaque">${diaFormatado}</strong> <span class="dia-semana-label">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
-        <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'ponto-vazio'}">${entradaCol}</span></td>
-        <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'ponto-vazio'}">${almocoSaidaCol}</span></td>
-        <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'ponto-vazio'}">${almocoRetornoCol}</span></td>
-        <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'ponto-vazio'}">${saidaCol}</span></td>
-        <td>${totalTrabStr}</td>
-        <td><span class="small">${cargaStr}</span></td>
-        <td>${extrasStr}</td>
-        <td>${saldoDiaStr}</td>
-        <td class="no-print text-center">
-          <button class="btn btn-sm btn-outline-warning p-1" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;" onclick="abrirModalAjusteDia('${cleanCpf}', '${dataDiaStr}', event)" title="Ajustar batidas ou atestado deste dia">
-            <i class="fas fa-edit" style="font-size:0.75rem;"></i>
-          </button>
-        </td>
-      </tr>
-    `;
-  }
-
-  const saldoTotalMinutos = totalMinutosExtras - totalMinutosAtrasos;
-
-  return {
-    linhasHtml,
-    resumo: {
-      totalMinutosTrabalhados,
-      totalMinutosPrevistos,
-      totalMinutosExtras,
-      totalMinutosAtrasos,
-      saldoTotalMinutos,
-      diasTrabalhados
-    }
-  };
-}
-
-// ─── Renderizador de Folha A4 Individual ────────────────────────────────
-function renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dadosEspelho, dataEmissaoStr) {
-  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
-  const nomeFunc = func.nome || 'Colaborador';
-  const cargoFunc = func.cargo || 'Não informado';
-  const depFunc = func.departamento || 'Geral';
-  const diasMes = new Date(ano, mes, 0).getDate();
-  const periodoStr = `01/${String(mes).padStart(2, '0')}/${ano} a ${String(diasMes).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
-
-  const rotulosJornada = {
-    '8h_seg_sex': '8 horas diárias (Seg a Sex - 40h/sem)',
-    '8h_seg_sex_4h_sab': '8h Seg-Sex + 4h Sáb (44h/sem CLT)',
-    '6h_diarias': '6 horas diárias (Seg a Sex - 30h/sem)'
-  };
-  const jornadaRotulo = rotulosJornada[jornadaTipo] || '8 horas diárias';
-
-  const resumo = dadosEspelho.resumo;
-  const saldoSinal = resumo.saldoTotalMinutos >= 0 ? '+' : '-';
-  const saldoClasse = resumo.saldoTotalMinutos >= 0 ? 'text-success' : 'text-danger';
-
-  return `
-    <div class="folha-a4-individual">
-      <!-- Cabeçalho Oficial do Documento -->
-      <div class="cabecalho-folha-oficial mb-2 p-2 border border-secondary rounded bg-dark">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <div>
-            <h5 class="fw-bold mb-0 text-light text-uppercase">Espelho de Ponto Individual de Trabalho</h5>
-            <span class="text-accent small fw-bold"><i class="fas fa-clock me-1"></i> Mobilittà — Sistema de Ponto Eletrônico</span>
-          </div>
-          <div class="text-end small">
-            <div>Período: <strong class="folha-valor-destaque">${periodoStr}</strong></div>
-            <div>Emissão: <strong class="folha-valor-destaque">${dataEmissaoStr}</strong></div>
-          </div>
-        </div>
-        <div class="border-top border-secondary my-1 pt-1 row g-2 small">
-          <div class="col-4">Colaborador: <strong class="folha-valor-destaque">${nomeFunc}</strong></div>
-          <div class="col-4">CPF: <strong class="folha-valor-destaque">${formatarCPF(cleanCpf)}</strong></div>
-          <div class="col-4">Cargo: <strong class="folha-valor-destaque">${cargoFunc}</strong></div>
-          <div class="col-4">Departamento: <strong class="folha-valor-destaque">${depFunc}</strong></div>
-          <div class="col-8">Regime / Carga: <strong class="folha-valor-destaque">${jornadaRotulo}</strong></div>
-        </div>
-      </div>
-
-      <!-- Tabela Detalhada com Horas Extras e Saldos -->
-      <div class="table-responsive">
-        <table class="admin-table tabela-folha-a4">
-          <thead>
-            <tr>
-              <th style="width: 13%;">Dia</th>
-              <th style="width: 10%;">Entrada</th>
-              <th style="width: 11%;">Saída Almoço</th>
-              <th style="width: 11%;">Ret. Almoço</th>
-              <th style="width: 10%;">Saída</th>
-              <th style="width: 11%;">Total Trab.</th>
-              <th style="width: 10%;">Carga</th>
-              <th style="width: 11%;">H. Extras (+)</th>
-              <th style="width: 10%;">Saldo Dia</th>
-              <th style="width: 5%;" class="no-print text-center">Ajuste</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${dadosEspelho.linhasHtml}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Mini Resumo de Totais no Rodapé da Tabela -->
-      <div class="resumo-folha-rodape">
-        <div>Total Trab.: <strong>${formatarHM(resumo.totalMinutosTrabalhados)}</strong></div>
-        <div>Carga Prevista: <strong>${formatarHM(resumo.totalMinutosPrevistos)}</strong></div>
-        <div>Horas Extras (+): <strong class="text-success">+${formatarHM(resumo.totalMinutosExtras)}</strong></div>
-        <div>Atrasos/Faltas (-): <strong class="text-danger">-${formatarHM(resumo.totalMinutosAtrasos)}</strong></div>
-        <div>Saldo do Mês: <strong class="${saldoClasse}">${saldoSinal}${formatarHM(Math.abs(resumo.saldoTotalMinutos))}</strong></div>
-      </div>
-
-      <!-- Termo de Declaração e Bloco de Assinatura para Conferência -->
-      <div class="bloco-assinaturas mt-2 pt-2 border-top border-secondary">
-        <p class="small text-center mb-4 fst-italic texto-declaracao-folha">
-          "Reconheço a exatidão das anotações constantes neste espelho de ponto referente ao período indicado, concordando com as horas normais, horas extras e saldos apurados."
-        </p>
-        <div class="row text-center g-4 pt-1">
-          <div class="col-6">
-            <div class="linha-assinatura">
-              <strong class="d-block nome-assinatura">${nomeFunc}</strong>
-              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
-            </div>
-          </div>
-          <div class="col-6">
-            <div class="linha-assinatura">
-              <strong class="d-block nome-assinatura">Assinatura do Empregador / RH</strong>
-              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function atualizarCardsResumoTopo(resumo) {
-  const elTotalHoras = document.getElementById('total-horas-mes');
-  if (elTotalHoras) elTotalHoras.textContent = formatarHM(resumo.totalMinutosTrabalhados);
-
-  const elCargaPrevista = document.getElementById('total-carga-prevista-mes');
-  if (elCargaPrevista) elCargaPrevista.textContent = formatarHM(resumo.totalMinutosPrevistos);
-
-  const elHorasExtras = document.getElementById('total-horas-extras-mes');
-  if (elHorasExtras) elHorasExtras.textContent = `+${formatarHM(resumo.totalMinutosExtras)}`;
-
-  const elAtrasos = document.getElementById('total-atrasos-mes');
-  if (elAtrasos) elAtrasos.textContent = `-${formatarHM(resumo.totalMinutosAtrasos)}`;
-
-  const elSaldoHoras = document.getElementById('saldo-horas-mes');
-  if (elSaldoHoras) {
-    if (resumo.saldoTotalMinutos >= 0) {
-      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-success';
-      elSaldoHoras.textContent = `+${formatarHM(resumo.saldoTotalMinutos)}`;
-    } else {
-      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-danger';
-      elSaldoHoras.textContent = `-${formatarHM(Math.abs(resumo.saldoTotalMinutos))}`;
-    }
-  }
-}
-
-// ─── Geração Principal (Individual ou em Lote de Todos) ───────────────────
-async function gerarEspelho() {
-  const selectFunc = document.getElementById('select-relatorio-func');
-  const inputMes = document.getElementById('select-relatorio-mes');
-  const selectJornada = document.getElementById('select-relatorio-jornada');
-  const containerFolhas = document.getElementById('folha-impressao-a4');
-  const resumoCards = document.getElementById('resumo-horas-mes');
-
-  if (!inputMes.value) {
-    const agora = new Date();
-    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  const funcSelecionado = selectFunc ? selectFunc.value : '';
-  const mesAno = inputMes ? inputMes.value : '';
-  const jornadaTipo = selectJornada ? selectJornada.value : '8h_seg_sex';
-
-  if (!funcSelecionado || !mesAno) {
-    if (containerFolhas) {
-      containerFolhas.innerHTML = '<div class="text-center py-4 text-muted">Selecione um colaborador e mês acima.</div>';
-    }
-    return;
-  }
-
-  const [ano, mes] = mesAno.split('-').map(Number);
-  const dataEmissaoStr = new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-
-  if (containerFolhas) {
-    containerFolhas.innerHTML = '<div class="text-center py-5 text-muted no-print"><i class="fas fa-spinner fa-spin fa-2x mb-3 text-accent"></i><br>Carregando registros e apurando espelhos de ponto...</div>';
-  }
-
-  try {
-    const [snapReg, snapAtestados] = await Promise.all([
-      db.collection('registros').get(),
-      db.collection('atestados').get()
-    ]);
-
-    const todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
-    const todosAtestados = snapAtestados.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    if (funcSelecionado === 'TODOS') {
-      // ── MODO TODOS OS COLABORADORES (IMPRESSÃO EM LOTE) ──
-      const funcsAtivos = listaFuncionariosCache.filter(f => f.ativo !== false);
-      if (funcsAtivos.length === 0) {
-        containerFolhas.innerHTML = '<div class="alert alert-warning">Nenhum colaborador ativo encontrado para geração do espelho.</div>';
-        return;
-      }
-
-      if (resumoCards) resumoCards.classList.add('d-none');
-
-      let htmlTodasFolhas = `
-        <div class="alert alert-primary no-print d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-          <div>
-            <i class="fas fa-users me-2"></i>
-            <strong>Modo Todos os Colaboradores:</strong> Visualizando espelho de ponto de <strong>${funcsAtivos.length}</strong> colaboradores do mês <strong>${String(mes).padStart(2,'0')}/${ano}</strong>.
-          </div>
-          <button class="btn btn-sm btn-success" onclick="imprimirFolhaA4()">
-            <i class="fas fa-print me-1"></i> Imprimir Todos Agora (Lote)
-          </button>
-        </div>
-      `;
-
-      funcsAtivos.forEach((func) => {
-        const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
-        htmlTodasFolhas += renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
-      });
-
-      containerFolhas.innerHTML = htmlTodasFolhas;
-    } else {
-      // ── MODO COLABORADOR INDIVIDUAL ──
-      if (resumoCards) resumoCards.classList.remove('d-none');
-      const cleanCpf = funcSelecionado.replace(/\D/g, '');
-      const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf) || {
-        cpf: cleanCpf,
-        nome: 'Colaborador',
-        cargo: 'Não informado',
-        departamento: 'Geral'
-      };
-
-      const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
-      containerFolhas.innerHTML = renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
-
-      atualizarCardsResumoTopo(dados.resumo);
-    }
-  } catch (err) {
-    console.error('Erro ao gerar espelho:', err);
-    if (containerFolhas) {
-      containerFolhas.innerHTML = `<div class="alert alert-danger py-4 text-center">Erro ao calcular espelho: ${err.message}</div>`;
-    }
-  }
-}
-
-// ─── Utilitários ──────────────────────────────────────
-function formatarCPF(v) {
-  const d = v.replace(/\D/g, '');
-  if (d.length !== 11) return v;
-  return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-}
-
-function mascaraCPFModal(input) {
-  let v = input.value.replace(/\D/g, '').slice(0, 11);
-  v = v.replace(/(\d{3})(\d)/, '$1.$2');
-  v = v.replace(/(\d{3})(\d)/, '$1.$2');
-  v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
-  input.value = v;
-}
-
-function verFotoAmpliada(src, legenda) {
-  document.getElementById('modal-foto-img').src = src;
-  document.getElementById('modal-foto-legenda').textContent = legenda;
-  modalFotoInstancia.show();
-}
-
-
-// ============================================================
-// ─── GESTÃO DE ATESTADOS E JUSTIFICATIVAS ────────────────────
-// ============================================================
-
-async function carregarAtestados() {
-  const tbody = document.getElementById('tabela-atestados-corpo');
-  if (!tbody || !db) return;
-
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando atestados...</td></tr>';
-
-  try {
-    const snap = await db.collection('atestados').get();
-    listaAtestadosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    // Ordena do mais recente para o mais antigo
-    listaAtestadosCache.sort((a, b) => {
-      const da = a.dataInicio || '';
-      const dbDate = b.dataInicio || '';
-      return dbDate.localeCompare(da);
-    });
-
-    renderizarTabelaAtestados(listaAtestadosCache);
-  } catch (err) {
-    console.error('Erro ao carregar atestados:', err);
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Erro ao carregar atestados: ${err.message}</td></tr>`;
-  }
-}
-
-function renderizarTabelaAtestados(lista) {
-  const tbody = document.getElementById('tabela-atestados-corpo');
-  const badgeTotal = document.getElementById('badge-total-atestados');
-  if (badgeTotal) badgeTotal.textContent = `${lista.length} atestado${lista.length === 1 ? '' : 's'}`;
-
-  if (!lista || lista.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Nenhum atestado ou justificativa cadastrada ainda.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = lista.map(at => {
-    const dataIni = at.dataInicio ? at.dataInicio.split('-').reverse().join('/') : '--';
-    const dataFim = at.dataFim ? at.dataFim.split('-').reverse().join('/') : dataIni;
-    const periodoStr = dataIni === dataFim ? dataIni : `${dataIni} até ${dataFim}`;
-
-    let diasDuracao = 1;
-    if (at.dataInicio && at.dataFim) {
-      const msDiff = new Date(at.dataFim).getTime() - new Date(at.dataInicio).getTime();
-      diasDuracao = Math.max(1, Math.round(msDiff / (1000 * 60 * 60 * 24)) + 1);
-    }
-
-    return `
-      <tr>
-        <td>
-          <strong class="text-light fs-6">${at.funcionarioNome || 'Colaborador'}</strong>
-          <div class="text-muted small">CPF: ${formatarCPF(at.cpf || '')}</div>
-        </td>
-        <td>
-          <span class="badge border border-warning text-warning" style="background: rgba(245,158,11,0.12);">
-            <i class="fas fa-file-medical me-1"></i>${at.tipo || 'Atestado'}
-          </span>
-        </td>
-        <td><strong class="text-light">${periodoStr}</strong></td>
-        <td><span class="badge bg-secondary">${diasDuracao} dia${diasDuracao === 1 ? '' : 's'}</span></td>
-        <td>
-          <span class="text-light">${at.motivo || '-'}</span>
-        </td>
-        <td>
-          <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Abonado</span>
-        </td>
-        <td class="text-center">
-          <button class="btn btn-outline-danger btn-sm p-1 px-2" onclick="excluirAtestado('${at.id}', '${at.funcionarioNome || ''} - ${periodoStr}')" title="Excluir atestado">
-            <i class="fas fa-trash-alt"></i>
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-function filtrarAtestados() {
-  const busca = (document.getElementById('filtro-atestado-busca')?.value || '').toLowerCase().trim();
-  if (!busca) {
-    renderizarTabelaAtestados(listaAtestadosCache);
-    return;
-  }
-  const filtrados = listaAtestadosCache.filter(at => {
-    const nome = (at.funcionarioNome || '').toLowerCase();
-    const cpf = (at.cpf || '').replace(/\D/g, '');
-    const motivo = (at.motivo || '').toLowerCase();
-    const tipo = (at.tipo || '').toLowerCase();
-    return nome.includes(busca) || cpf.includes(busca) || motivo.includes(busca) || tipo.includes(busca);
-  });
-  renderizarTabelaAtestados(filtrados);
-}
-
-function preencherSelectColaboradores(selectId, cpfSelecionado) {
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  select.innerHTML = '<option value="">-- Selecione o colaborador --</option>';
-
-  const ativos = listaFuncionariosCache.filter(f => f.ativo !== false);
-  ativos.forEach(f => {
-    const opt = document.createElement('option');
-    opt.value = f.cpf;
-    opt.dataset.id = f.id;
-    opt.dataset.nome = f.nome;
-    opt.dataset.cargo = f.cargo || '';
-    opt.dataset.departamento = f.departamento || '';
-    opt.textContent = `${f.nome} (CPF: ${formatarCPF(f.cpf)})`;
-    if (cpfSelecionado && f.cpf === cpfSelecionado) opt.selected = true;
-    select.appendChild(opt);
-  });
-}
-
-function abrirModalAtestado() {
-  preencherSelectColaboradores('atestado-func-select');
-  const hojeStr = new Date().toISOString().split('T')[0];
-  document.getElementById('atestado-data-inicio').value = hojeStr;
-  document.getElementById('atestado-data-fim').value = hojeStr;
-  document.getElementById('atestado-motivo').value = '';
-  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
-}
-
-function abrirModalAtestadoParaFuncionario() {
-  const selectEspelho = document.getElementById('select-relatorio-func');
-  const cpfAtual = selectEspelho ? selectEspelho.value : '';
-  preencherSelectColaboradores('atestado-func-select', cpfAtual);
-
-  const mesAnoInput = document.getElementById('select-relatorio-mes')?.value;
-  let dataSugerida = new Date().toISOString().split('T')[0];
-  if (mesAnoInput) {
-    const partes = mesAnoInput.split('-');
-    dataSugerida = `${partes[0]}-${partes[1]}-01`;
-  }
-
-  document.getElementById('atestado-data-inicio').value = dataSugerida;
-  document.getElementById('atestado-data-fim').value = dataSugerida;
-  document.getElementById('atestado-motivo').value = '';
-  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
-}
-
-async function salvarNovoAtestado(e) {
-  e.preventDefault();
-  const select = document.getElementById('atestado-func-select');
-  const cpf = select.value;
-  if (!cpf) {
-    alert('Por favor, selecione o colaborador.');
-    return;
-  }
-
-  const opt = select.selectedOptions[0];
-  const funcNome = opt.dataset.nome || '';
-  const funcId = opt.dataset.id || '';
-  const dataInicio = document.getElementById('atestado-data-inicio').value;
-  const dataFim = document.getElementById('atestado-data-fim').value;
-  const tipo = document.getElementById('atestado-tipo-select').value;
-  const motivo = document.getElementById('atestado-motivo').value.trim();
-
-  if (dataFim < dataInicio) {
-    alert('A Data Fim não pode ser anterior à Data Início.');
-    return;
-  }
-
-  try {
-    await db.collection('atestados').add({
-      cpf: cpf,
-      funcionarioId: funcId,
-      funcionarioNome: funcNome,
-      dataInicio: dataInicio,
-      dataFim: dataFim,
-      tipo: tipo,
-      motivo: motivo,
-      abonado: true,
-      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
-    });
-
-    if (modalAtestadoInstancia) modalAtestadoInstancia.hide();
-    mostrarToastSucesso('Atestado / Justificativa registrada com sucesso!');
-
-    carregarAtestados();
-    // Se a tela de espelho estiver visível para o mesmo funcionário, atualiza
-    const selectEspelho = document.getElementById('select-relatorio-func');
-    if (selectEspelho && selectEspelho.value === cpf) {
-      gerarEspelho();
-    }
-  } catch (err) {
-    console.error('Erro ao salvar atestado:', err);
-    alert('Erro ao salvar no Firebase: ' + err.message);
-  }
-}
-
-async function excluirAtestado(id, desc) {
-  if (!confirm(`Deseja realmente excluir este atestado?\n\n${desc}`)) return;
-
-  try {
-    await db.collection('atestados').doc(id).delete();
-    mostrarToastSucesso('Atestado excluído com sucesso.');
-    carregarAtestados();
-    gerarEspelho();
-  } catch (err) {
-    console.error('Erro ao excluir atestado:', err);
-    alert('Erro ao excluir: ' + err.message);
-  }
-}
-
-// ============================================================
-// ─── AJUSTE DE HORÁRIOS DO DIA (ESQUECIMENTO / CORREÇÃO) ────
-// ============================================================
-
-async function abrirModalAjusteDia(cpf, dataStr, ev) {
-  if (ev) ev.stopPropagation();
-
-  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, ''));
-  const nomeFunc = func ? func.nome : 'Colaborador';
-
-  const [ano, mes, dia] = dataStr.split('-').map(Number);
-  const dataFormatada = `${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}`;
-
-  document.getElementById('ajuste-dia-cpf').value = cpf;
-  document.getElementById('ajuste-dia-data').value = dataStr;
-  document.getElementById('ajuste-dia-nome').textContent = nomeFunc;
-  document.getElementById('ajuste-dia-data-label').textContent = dataFormatada;
-
-  // Limpa inputs
-  ['entrada', 'almoco-saida', 'almoco-retorno', 'saida', 'saida-extra', 'retorno-extra'].forEach(tipo => {
-    document.getElementById(`ajuste-dia-${tipo}`).value = '';
-  });
-
-  document.getElementById('ajuste-dia-check-atestado').checked = false;
-  document.getElementById('ajuste-dia-box-atestado').classList.add('d-none');
-  document.getElementById('ajuste-dia-atestado-desc').value = '';
-
-  // Busca batidas deste dia para preencher horários existentes
-  try {
-    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
-    const regsDia = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
-      const dt = extrairData(r.timestamp);
-      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
-    });
-
-    regsDia.forEach(r => {
-      const dt = extrairData(r.timestamp);
-      if (!dt) return;
-      const horaStr = dt.toTimeString().slice(0, 5); // "HH:mm"
-      if (r.tipo === 'entrada') document.getElementById('ajuste-dia-entrada').value = horaStr;
-      if (r.tipo === 'almoco_saida') document.getElementById('ajuste-dia-almoco-saida').value = horaStr;
-      if (r.tipo === 'almoco_retorno') document.getElementById('ajuste-dia-almoco-retorno').value = horaStr;
-      if (r.tipo === 'saida') document.getElementById('ajuste-dia-saida').value = horaStr;
-      if (r.tipo === 'saida_extra') document.getElementById('ajuste-dia-saida-extra').value = horaStr;
-      if (r.tipo === 'retorno_extra') document.getElementById('ajuste-dia-retorno-extra').value = horaStr;
-    });
-
-    // Verifica se já tem atestado neste dia
-    const snapAt = await db.collection('atestados').where('cpf', '==', cpf).get();
-    const at = snapAt.docs.map(d => d.data()).find(a => {
-      const ini = a.dataInicio || '';
-      const fim = a.dataFim || a.dataInicio || '';
-      return dataStr >= ini && dataStr <= fim;
-    });
-
-    if (at) {
-      document.getElementById('ajuste-dia-check-atestado').checked = true;
-      document.getElementById('ajuste-dia-box-atestado').classList.remove('d-none');
-      document.getElementById('ajuste-dia-atestado-tipo').value = at.tipo || 'Atestado Médico (Abonar Dia)';
-      document.getElementById('ajuste-dia-atestado-desc').value = at.motivo || '';
-    }
-
-  } catch (err) {
-    console.warn('Erro ao carregar batidas do dia:', err);
-  }
-
-  if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.show();
-}
-
-function toggleAtestadoNoAjuste(checked) {
-  const box = document.getElementById('ajuste-dia-box-atestado');
-  if (!box) return;
-  if (checked) box.classList.remove('d-none');
-  else box.classList.add('d-none');
-}
-
-async function salvarAjusteDia(e) {
-  e.preventDefault();
-  const cpf = document.getElementById('ajuste-dia-cpf').value;
-  const dataStr = document.getElementById('ajuste-dia-data').value;
-  const motivo = document.getElementById('ajuste-dia-motivo').value;
-
-  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, '')) || {};
-  const [ano, mes, dia] = dataStr.split('-').map(Number);
-
-  const horarios = {
-    entrada: document.getElementById('ajuste-dia-entrada').value,
-    almoco_saida: document.getElementById('ajuste-dia-almoco-saida').value,
-    almoco_retorno: document.getElementById('ajuste-dia-almoco-retorno').value,
-    saida: document.getElementById('ajuste-dia-saida').value,
-    saida_extra: document.getElementById('ajuste-dia-saida-extra').value,
-    retorno_extra: document.getElementById('ajuste-dia-retorno-extra').value
-  };
-
-  try {
-    // 1. Busca os registros existentes deste dia
-    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
-    const regsExistentes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
-      const dt = extrairData(r.timestamp);
-      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
-    });
-
-    // 2. Para cada tipo, insere, atualiza ou apaga se estiver em branco
-    for (const [tipo, horaVal] of Object.entries(horarios)) {
-      const regAtual = regsExistentes.find(r => r.tipo === tipo);
-
-      if (horaVal) {
-        const [h, m] = horaVal.split(':').map(Number);
-        const dataBatida = new Date(ano, mes - 1, dia, h, m, 0);
-        const ts = firebase.firestore.Timestamp.fromDate(dataBatida);
-
-        if (regAtual) {
-          // Atualiza registro existente
-          await db.collection('registros').doc(regAtual.id).update({
-            timestamp: ts,
-            ajusteManual: true,
-            justificativa: motivo,
-            atualizadoPor: sessionStorage.getItem('admin_email') || 'admin'
-          });
-        } else {
-          // Insere nova batida manual
-          await db.collection('registros').add({
-            cpf: cpf,
-            funcionarioId: func.id || '',
-            funcionarioNome: func.nome || 'Colaborador',
-            cargo: func.cargo || '',
-            departamento: func.departamento || '',
-            tipo: tipo,
-            tipoLabel: TIPOS_LABEL[tipo] || tipo,
-            timestamp: ts,
-            confianca: 100,
-            ajusteManual: true,
-            justificativa: motivo,
-            criadoPor: sessionStorage.getItem('admin_email') || 'admin'
-          });
-        }
-      } else if (regAtual) {
-        // Se o campo foi esvaziado pelo admin, remove a batida
-        await db.collection('registros').doc(regAtual.id).delete();
-      }
-    }
-
-    // 3. Trata Atestado se selecionado
-    const checkAtestado = document.getElementById('ajuste-dia-check-atestado').checked;
-    if (checkAtestado) {
-      const atTipo = document.getElementById('ajuste-dia-atestado-tipo').value;
-      const atDesc = document.getElementById('ajuste-dia-atestado-desc').value.trim() || 'Atestado / Justificativa';
-
-      await db.collection('atestados').add({
-        cpf: cpf,
-        funcionarioId: func.id || '',
-        funcionarioNome: func.nome || 'Colaborador',
-        dataInicio: dataStr,
-        dataFim: dataStr,
-        tipo: atTipo,
-        motivo: atDesc,
-        abonado: true,
-        criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-        criadoPor: sessionStorage.getItem('admin_email') || 'admin'
-      });
-    }
-
-    if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.hide();
-    mostrarToastSucesso('Horários do dia atualizados com sucesso!');
-
-    gerarEspelho();
-  } catch (err) {
-    console.error('Erro ao salvar ajuste do dia:', err);
-    alert('Erro ao salvar alterações: ' + err.message);
-  }
-}
-
-// ============================================================
-// ─── INSERÇÃO DE PONTO MANUAL AVULSO ────────────────────────
-// ============================================================
-
-function abrirModalPontoManual() {
-  const selectEspelho = document.getElementById('select-relatorio-func');
-  const cpfAtual = selectEspelho ? selectEspelho.value : '';
-  preencherSelectColaboradores('ponto-manual-func', cpfAtual);
-
-  const agora = new Date();
-  document.getElementById('ponto-manual-data').value = agora.toISOString().split('T')[0];
-  document.getElementById('ponto-manual-hora').value = agora.toTimeString().slice(0, 5);
-  document.getElementById('ponto-manual-motivo').value = 'Esquecimento de registro pelo colaborador';
-
-  if (modalPontoManualInstancia) modalPontoManualInstancia.show();
-}
-
-async function salvarPontoManualAvulso(e) {
-  e.preventDefault();
-  const select = document.getElementById('ponto-manual-func');
-  const cpf = select.value;
-  if (!cpf) {
-    alert('Por favor, selecione o colaborador.');
-    return;
-  }
-
-  const opt = select.selectedOptions[0];
-  const funcNome = opt.dataset.nome || '';
-  const funcId = opt.dataset.id || '';
-  const funcCargo = opt.dataset.cargo || '';
-  const funcDep = opt.dataset.departamento || '';
-
-  const dataStr = document.getElementById('ponto-manual-data').value;
-  const horaStr = document.getElementById('ponto-manual-hora').value;
-  const tipo = document.getElementById('ponto-manual-tipo').value;
-  const motivo = document.getElementById('ponto-manual-motivo').value.trim();
-
-  const [ano, mes, dia] = dataStr.split('-').map(Number);
-  const [h, m] = horaStr.split(':').map(Number);
-  const dataCompleta = new Date(ano, mes - 1, dia, h, m, 0);
-
-  try {
-    await db.collection('registros').add({
-      cpf: cpf,
-      funcionarioId: funcId,
-      funcionarioNome: funcNome,
-      cargo: funcCargo,
-      departamento: funcDep,
-      tipo: tipo,
-      tipoLabel: TIPOS_LABEL[tipo] || tipo,
-      timestamp: firebase.firestore.Timestamp.fromDate(dataCompleta),
-      confianca: 100,
-      ajusteManual: true,
-      justificativa: motivo,
-      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
-    });
-
-    if (modalPontoManualInstancia) modalPontoManualInstancia.hide();
-    mostrarToastSucesso('Ponto manual inserido com sucesso!');
-
-    gerarEspelho();
-    carregarDadosGerais();
-  } catch (err) {
-    console.error('Erro ao salvar ponto manual:', err);
-    alert('Erro ao salvar no Firebase: ' + err.message);
-  }
-}
-
-async function excluirRegistroPonto(id, nome, hora, ev) {
-  if (ev) ev.stopPropagation();
-
-  if (!confirm(`Deseja realmente excluir esta batida de ponto?\n\nColaborador: ${nome}\nHorário: ${hora}`)) return;
-
-  try {
-    await db.collection('registros').doc(id).delete();
-    mostrarToastSucesso('Batida de ponto excluída com sucesso.');
-    carregarDadosGerais();
-    gerarEspelho();
-  } catch (err) {
-    console.error('Erro ao excluir registro:', err);
-    alert('Erro ao excluir batida: ' + err.message);
-  }
-}
-
-function mostrarToastSucesso(msg) {
-  alert(msg);
-}
+// ============================================================
+//  admin.js — Lógica do Painel de Administração
+//  Firebase Firestore + face-api.js
+// ============================================================
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBCuPyOvWhv0MVz6S-Cd8bFDgBcyF1ZCY4",
+  authDomain: "ponto-mobilitta.firebaseapp.com",
+  projectId: "ponto-mobilitta",
+  storageBucket: "ponto-mobilitta.firebasestorage.app",
+  messagingSenderId: "217323535686",
+  appId: "1:217323535686:web:6c583a7ba09d64594db947"
+};
+
+const TIPOS_LABEL = {
+  entrada: "Entrada",
+  almoco_saida: "Saída Almoço",
+  almoco_retorno: "Retorno Almoço",
+  saida_extra: "Saída Extra",
+  retorno_extra: "Retorno Extra",
+  saida: "Saída"
+};
+
+let db, auth;
+let streamAdminCam = null;
+let listaFuncionariosCache = [];
+let listaRegistrosCache = [];
+let modalFuncInstancia = null;
+let modalFotoInstancia = null;
+let modalAjusteDiaInstancia = null;
+let modalAtestadoInstancia = null;
+let modalPontoManualInstancia = null;
+let listaAtestadosCache = [];
+
+function extrairData(ts) {
+  if (!ts) return null;
+  if (ts.toDate && typeof ts.toDate === 'function') return ts.toDate();
+  if (ts.seconds) return new Date(ts.seconds * 1000);
+  if (typeof ts === 'string') return new Date(ts);
+  if (ts instanceof Date) return ts;
+  return null;
+}
+
+// ─── Inicialização ────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  // Verifica autenticação simples
+  if (!sessionStorage.getItem('admin_logado')) {
+    window.location.href = '/login.html';
+    return;
+  }
+
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+
+  modalFuncInstancia = new bootstrap.Modal(document.getElementById('modal-func'));
+  modalFotoInstancia = new bootstrap.Modal(document.getElementById('modal-foto'));
+  const elModalAjuste = document.getElementById('modal-ajuste-dia');
+  if (elModalAjuste) modalAjusteDiaInstancia = new bootstrap.Modal(elModalAjuste);
+  const elModalAtestado = document.getElementById('modal-atestado');
+  if (elModalAtestado) modalAtestadoInstancia = new bootstrap.Modal(elModalAtestado);
+  const elModalManual = document.getElementById('modal-ponto-manual');
+  if (elModalManual) modalPontoManualInstancia = new bootstrap.Modal(elModalManual);
+
+  // Data atual
+  const agora = new Date();
+  document.getElementById('dash-data-atual').textContent = agora.toLocaleDateString('pt-BR', {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+  });
+
+  const mesAtualInput = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  document.getElementById('select-relatorio-mes').value = mesAtualInput;
+
+  // Carrega modelos face-api em segundo plano
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models')
+    ]);
+  } catch (e) {
+    console.warn('Erro ao carregar modelos locais, tentando CDN:', e);
+    try {
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'),
+        faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'),
+        faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights')
+      ]);
+    } catch (err) {
+      console.error('Falha geral ao carregar modelos face-api:', err);
+    }
+  }
+
+  // Carrega dados iniciais
+  carregarDadosGerais();
+});
+
+// ─── Navegação entre Abas ─────────────────────────────
+function navegarAba(aba, el) {
+  document.querySelectorAll('.aba-secao').forEach(sec => sec.classList.add('d-none'));
+  document.querySelectorAll('.nav-item-link').forEach(link => link.classList.remove('ativo'));
+
+  const sec = document.getElementById(`aba-${aba}`);
+  if (sec) sec.classList.remove('d-none');
+  if (el) el.classList.add('ativo');
+
+  if (aba === 'dashboard') carregarDadosGerais();
+  if (aba === 'funcionarios') carregarFuncionarios();
+  if (aba === 'relatorios') carregarOpcoesRelatorio();
+  if (aba === 'atestados') carregarAtestados();
+}
+
+function fazerLogout() {
+  sessionStorage.removeItem('admin_logado');
+  sessionStorage.removeItem('admin_email');
+  if (auth) auth.signOut();
+  window.location.href = '/login.html';
+}
+
+// ─── Dashboard & Métricas ─────────────────────────────
+async function carregarDadosGerais() {
+  try {
+    // 1. Total funcionários
+    const snapFunc = await db.collection('funcionarios').get();
+    listaFuncionariosCache = snapFunc.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const totalAtivos = listaFuncionariosCache.filter(f => f.ativo !== false).length;
+    const elTotalFunc = document.getElementById('dash-total-func');
+    if (elTotalFunc) elTotalFunc.textContent = totalAtivos;
+
+    // 2. Todos os Registros do Firestore (sem exigência de índice)
+    const snapReg = await db.collection('registros').get();
+    let todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Ordena do mais recente para o mais antigo em memória
+    todosRegistros.sort((a, b) => {
+      const ta = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0);
+      const tb = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0);
+      return tb - ta;
+    });
+
+    const inicioHoje = new Date();
+    inicioHoje.setHours(0, 0, 0, 0);
+    const inicioHojeMs = inicioHoje.getTime();
+
+    const registrosHoje = todosRegistros.filter(r => {
+      const dt = r.timestamp?.toDate ? r.timestamp.toDate().getTime() : (r.timestamp?.seconds ? r.timestamp.seconds * 1000 : 0);
+      return dt >= inicioHojeMs;
+    });
+
+    const elBatidasHoje = document.getElementById('dash-batidas-hoje');
+    if (elBatidasHoje) elBatidasHoje.textContent = registrosHoje.length;
+
+    // Presentes (que bateram entrada hoje)
+    const cpfsPresentes = new Set(registrosHoje.filter(r => r.tipo === 'entrada').map(r => r.cpf));
+    const elPresentes = document.getElementById('dash-presentes');
+    if (elPresentes) elPresentes.textContent = cpfsPresentes.size;
+    const elAusentes = document.getElementById('dash-ausentes');
+    if (elAusentes) elAusentes.textContent = Math.max(0, totalAtivos - cpfsPresentes.size);
+
+    // 3. Colaboradores com Registro Hoje (Agrupado com clique para expandir pontos)
+    const containerDash = document.getElementById('lista-colaboradores-dash');
+    const badgeTotalColabs = document.getElementById('dash-badge-total-colabs');
+
+    const registrosParaExibir = registrosHoje.length > 0 ? registrosHoje : todosRegistros;
+
+    if (registrosParaExibir.length === 0) {
+      if (containerDash) {
+        containerDash.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-inbox fs-2 mb-2 d-block"></i>Nenhum ponto registrado hoje ainda.</div>';
+      }
+      if (badgeTotalColabs) badgeTotalColabs.textContent = '0 colaboradores';
+      return;
+    }
+
+    // Agrupa os registros por funcionário (CPF)
+    const mapaColabs = new Map();
+    registrosParaExibir.forEach(r => {
+      const cleanCpf = (r.cpf || '').replace(/\D/g, '');
+      if (!cleanCpf) return;
+      if (!mapaColabs.has(cleanCpf)) {
+        const fInfo = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf);
+        mapaColabs.set(cleanCpf, {
+          cpf: cleanCpf,
+          nome: r.funcionarioNome || fInfo?.nome || 'Colaborador',
+          cargo: fInfo?.cargo || r.cargo || '',
+          departamento: fInfo?.departamento || r.departamento || '',
+          fotoPerfil: fInfo?.fotoBase64 || r.fotoSnapshot || '',
+          registros: []
+        });
+      }
+      mapaColabs.get(cleanCpf).registros.push(r);
+    });
+
+    const listaAgrupada = Array.from(mapaColabs.values());
+    if (badgeTotalColabs) {
+      badgeTotalColabs.textContent = `${listaAgrupada.length} colaborador${listaAgrupada.length === 1 ? '' : 'es'}`;
+    }
+
+    if (containerDash) {
+      containerDash.innerHTML = listaAgrupada.map(colab => {
+        // Ordena registros do mais recente para o mais antigo
+        const regs = colab.registros.sort((a, b) => {
+          const ta = extrairData(a.timestamp)?.getTime() || 0;
+          const tb = extrairData(b.timestamp)?.getTime() || 0;
+          return tb - ta;
+        });
+
+        const ultimo = regs[0];
+        const dtUltimo = extrairData(ultimo.timestamp);
+        const horaUltimo = dtUltimo ? dtUltimo.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '--:--';
+        const fotoPerfil = (colab.fotoPerfil && colab.fotoPerfil.length > 2500) 
+          ? colab.fotoPerfil 
+          : ((ultimo.fotoSnapshot && ultimo.fotoSnapshot.length > 2500) ? ultimo.fotoSnapshot : (colab.fotoPerfil || ''));
+
+        const fotoTag = fotoPerfil 
+          ? `<img src="${fotoPerfil}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);cursor:pointer;" onclick="verFotoAmpliada(this.src, '${colab.nome}')">`
+          : `<div style="width:48px;height:48px;border-radius:50%;background:#222;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:bold;font-size:1.2rem;">${colab.nome.charAt(0)}</div>`;
+
+        const linhasPontos = regs.map(reg => {
+          const dt = extrairData(reg.timestamp);
+          const dataHoraStr = dt ? dt.toLocaleString('pt-BR') : '--';
+          const horaStr = dt ? dt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '--';
+          let fotoReg = reg.fotoSnapshot || '';
+          if ((!fotoReg || fotoReg.length < 2500) && colab.fotoPerfil) {
+            fotoReg = colab.fotoPerfil;
+          }
+
+          return `
+            <tr>
+              <td class="text-light fw-bold">
+                <i class="fas fa-clock text-accent me-1"></i> ${horaStr} 
+                <small class="text-muted">(${dt ? dt.toLocaleDateString('pt-BR') : ''})</small>
+                ${reg.ajusteManual ? `<span class="badge bg-warning text-dark ms-1" title="${reg.justificativa || 'Ajuste Manual'}"><i class="fas fa-edit me-1"></i>Manual</span>` : ''}
+              </td>
+              <td><span class="badge-tipo badge-${reg.tipo}">${TIPOS_LABEL[reg.tipo] || reg.tipo}</span></td>
+              <td><span class="text-light">${reg.confianca ? `<i class="fas fa-fingerprint text-accent me-1"></i> ${reg.confianca}%` : '<span class="badge bg-success text-white"><i class="fas fa-camera me-1"></i>Foto</span>'}</span></td>
+              <td>
+                ${fotoReg 
+                  ? `<img src="${fotoReg}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;cursor:pointer;border:1px solid #555;" onclick="verFotoAmpliada(this.src, '${colab.nome} - ${dataHoraStr}')">`
+                  : '<span class="text-muted small">Sem foto</span>'}
+              </td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-danger p-1" onclick="excluirRegistroPonto('${reg.id}', '${colab.nome}', '${horaStr}', event)" title="Excluir esta batida"><i class="fas fa-trash-alt"></i></button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        return `
+          <div class="border border-secondary rounded-3 bg-dark p-3" style="cursor: pointer;" onclick="togglePontosDash('${colab.cpf}', event)">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div class="d-flex align-items-center gap-3">
+                ${fotoTag}
+                <div>
+                  <h6 class="fw-bold text-light mb-0 fs-5">${colab.nome}</h6>
+                  <div class="text-muted small">${colab.cargo || 'Funcionário'} ${colab.departamento ? '· ' + colab.departamento : ''} · CPF: ${formatarCPF(colab.cpf)}</div>
+                </div>
+              </div>
+
+              <div class="d-flex align-items-center gap-3">
+                <div class="text-end">
+                  <span class="badge fs-6" style="background:var(--accent);color:#fff;font-weight:700;">${regs.length} batida${regs.length === 1 ? '' : 's'}</span>
+                  <div class="small text-muted mt-1">Último: <span class="badge-tipo badge-${ultimo.tipo}">${TIPOS_LABEL[ultimo.tipo] || ultimo.tipo} às ${horaUltimo}</span></div>
+                </div>
+                <div class="p-2 rounded-circle border border-accent border-opacity-50 text-accent d-flex align-items-center justify-content-center" style="width:36px;height:36px;background:rgba(255,107,0,0.12);">
+                  <i class="fas fa-chevron-down fs-6" id="icone-dash-${colab.cpf}"></i>
+                </div>
+              </div>
+            </div>
+
+            <!-- GAVETA EXPANSÍVEL COM TODOS OS PONTOS (ABRE AO CLICAR NO COLABORADOR) -->
+            <div id="gaveta-dash-${colab.cpf}" class="d-none mt-3 pt-3 border-top border-secondary">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="text-muted small fw-bold text-uppercase"><i class="fas fa-history text-accent me-1"></i> Histórico de Batidas de ${colab.nome}:</span>
+                <span class="small text-muted">Clique na foto para ampliar</span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-dark table-sm table-hover mb-0 align-middle">
+                  <thead>
+                    <tr class="text-muted small">
+                      <th>Horário</th>
+                      <th>Tipo do Ponto</th>
+                      <th>Biometria Facial</th>
+                      <th>Foto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${linhasPontos}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+  } catch (err) {
+    console.error('Erro ao carregar dados gerais:', err);
+  }
+}
+
+function togglePontosDash(cpf, event) {
+  // Evita conflito se clicar diretamente na foto para abrir o modal de zoom
+  if (event && event.target && event.target.tagName === 'IMG') return;
+
+  const gaveta = document.getElementById(`gaveta-dash-${cpf}`);
+  const icone = document.getElementById(`icone-dash-${cpf}`);
+  if (gaveta) {
+    const estaFechado = gaveta.classList.contains('d-none');
+    if (estaFechado) {
+      gaveta.classList.remove('d-none');
+      if (icone) {
+        icone.classList.remove('fa-chevron-down');
+        icone.classList.add('fa-chevron-up');
+      }
+    } else {
+      gaveta.classList.add('d-none');
+      if (icone) {
+        icone.classList.remove('fa-chevron-up');
+        icone.classList.add('fa-chevron-down');
+      }
+    }
+  }
+}
+
+// ─── Gestão de Funcionários ───────────────────────────
+async function carregarFuncionarios() {
+  const tbody = document.getElementById('tabela-funcionarios');
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando colaboradores...</td></tr>';
+
+  try {
+    const snap = await db.collection('funcionarios').get();
+    listaFuncionariosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    renderizarTabelaFuncionarios(listaFuncionariosCache);
+  } catch (err) {
+    console.error('Erro ao listar funcionários:', err);
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Erro ao carregar do Firestore: ${err.message}</td></tr>`;
+  }
+}
+
+function renderizarTabelaFuncionarios(lista) {
+  const tbody = document.getElementById('tabela-funcionarios');
+  if (lista.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Nenhum funcionário cadastrado.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.map(f => {
+    const temBiometria = f.faceDescriptor && f.faceDescriptor.length > 0;
+    const ativo = f.ativo !== false;
+    const foto = f.fotoUrl || '';
+
+    return `
+      <tr>
+        <td>
+          ${foto 
+            ? `<img src="${foto}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="verFotoAmpliada(this.src, '${f.nome}')">`
+            : '<div style="width:40px;height:40px;border-radius:50%;background:#222;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;"><i class="fas fa-user text-muted"></i></div>'}
+        </td>
+        <td><strong class="text-light">${f.nome}</strong></td>
+        <td><code>${formatarCPF(f.cpf || '')}</code></td>
+        <td>${f.cargo || '-'} <small class="text-muted">${f.departamento ? '· ' + f.departamento : ''}</small></td>
+        <td>
+          ${temBiometria 
+            ? '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Ativa (128D)</span>' 
+            : '<span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Pendente</span>'}
+        </td>
+        <td>
+          <span class="badge ${ativo ? 'bg-primary' : 'bg-secondary'}">${ativo ? 'Ativo' : 'Inativo'}</span>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-outline-light me-1" onclick="editarFuncionario('${f.id}')" title="Editar">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger" onclick="excluirFuncionario('${f.id}', '${f.nome}')" title="Excluir">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filtrarFuncionarios() {
+  const termo = document.getElementById('filtro-func-busca').value.toLowerCase().replace(/\D/g, '') || document.getElementById('filtro-func-busca').value.toLowerCase();
+  const filtrados = listaFuncionariosCache.filter(f => {
+    const nomeMatch = (f.nome || '').toLowerCase().includes(termo);
+    const cpfMatch = (f.cpf || '').includes(termo);
+    return nomeMatch || cpfMatch;
+  });
+  renderizarTabelaFuncionarios(filtrados);
+}
+
+// ─── Modal de Funcionário (Cadastrar / Editar) ─────────
+function abrirModalFuncionario() {
+  document.getElementById('form-salvar-func').reset();
+  document.getElementById('func-id').value = '';
+  document.getElementById('func-foto-base64').value = '';
+  document.getElementById('func-face-descriptor').value = '';
+  document.getElementById('modal-func-titulo').innerHTML = '<i class="fas fa-user-plus text-accent me-2"></i>Cadastrar Colaborador';
+  document.getElementById('img-preview-func').style.display = 'none';
+  document.getElementById('status-biometria').innerHTML = 'Nenhuma biometria cadastrada ainda.';
+  document.getElementById('status-biometria').className = 'small text-muted';
+  fecharCameraAdmin();
+
+  modalFuncInstancia.show();
+}
+
+function editarFuncionario(id) {
+  const f = listaFuncionariosCache.find(item => item.id === id);
+  if (!f) return;
+
+  document.getElementById('func-id').value = f.id;
+  document.getElementById('func-nome').value = f.nome || '';
+  document.getElementById('func-cpf').value = formatarCPF(f.cpf || '');
+  document.getElementById('func-cargo').value = f.cargo || '';
+  document.getElementById('func-departamento').value = f.departamento || '';
+  document.getElementById('func-email').value = f.email || '';
+  document.getElementById('func-ativo').value = f.ativo !== false ? 'true' : 'false';
+
+  document.getElementById('func-foto-base64').value = f.fotoUrl || '';
+  document.getElementById('func-face-descriptor').value = f.faceDescriptor ? JSON.stringify(f.faceDescriptor) : '';
+
+  const img = document.getElementById('img-preview-func');
+  if (f.fotoUrl) {
+    img.src = f.fotoUrl;
+    img.style.display = 'block';
+  } else {
+    img.style.display = 'none';
+  }
+
+  if (f.faceDescriptor && f.faceDescriptor.length > 0) {
+    document.getElementById('status-biometria').innerHTML = '<i class="fas fa-check-circle text-success me-1"></i>Biometria cadastrada e válida.';
+    document.getElementById('status-biometria').className = 'small text-success';
+  } else {
+    document.getElementById('status-biometria').innerHTML = 'Biometria pendente. Capture uma nova foto.';
+    document.getElementById('status-biometria').className = 'small text-warning';
+  }
+
+  document.getElementById('modal-func-titulo').innerHTML = '<i class="fas fa-user-edit text-accent me-2"></i>Editar Colaborador';
+  fecharCameraAdmin();
+  modalFuncInstancia.show();
+}
+
+// Câmera ao vivo dentro do Modal Admin
+async function iniciarCameraAdmin() {
+  const wrapper = document.getElementById('wrapper-cam-admin');
+  const video = document.getElementById('video-cam-admin');
+  wrapper.classList.remove('d-none');
+
+  try {
+    streamAdminCam = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' },
+      audio: false
+    });
+    video.srcObject = streamAdminCam;
+    await video.play();
+  } catch (err) {
+    alert('Não foi possível acessar a câmera: ' + err.message);
+  }
+}
+
+function fecharCameraAdmin() {
+  if (streamAdminCam) {
+    streamAdminCam.getTracks().forEach(t => t.stop());
+    streamAdminCam = null;
+  }
+  const wrapper = document.getElementById('wrapper-cam-admin');
+  if (wrapper) wrapper.classList.add('d-none');
+}
+
+async function capturarFotoCamAdmin() {
+  const video = document.getElementById('video-cam-admin');
+  if (!video.videoWidth) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  const fotoBase64 = canvas.toDataURL('image/jpeg', 0.85);
+  fecharCameraAdmin();
+
+  await processarFotoBiometria(fotoBase64);
+}
+
+function carregarFotoArquivo(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    await processarFotoBiometria(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function processarFotoBiometria(fotoBase64) {
+  const statusEl = document.getElementById('status-biometria');
+  const spinner = document.getElementById('spinner-biometria');
+  const previewImg = document.getElementById('img-preview-func');
+
+  previewImg.src = fotoBase64;
+  previewImg.style.display = 'block';
+
+  statusEl.textContent = 'Processando rede neural facial...';
+  statusEl.className = 'small text-info';
+  spinner.classList.remove('d-none');
+
+  try {
+    const imgElement = await faceapi.fetchImage(fotoBase64);
+    const deteccao = await faceapi
+      .detectSingleFace(imgElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    spinner.classList.add('d-none');
+
+    if (!deteccao) {
+      statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-danger me-1"></i>Nenhum rosto detectado na foto. Tente outra com melhor iluminação.';
+      statusEl.className = 'small text-danger';
+      document.getElementById('func-face-descriptor').value = '';
+      return;
+    }
+
+    // Vetor de 128 dimensões
+    const descriptorArray = Array.from(deteccao.descriptor);
+    document.getElementById('func-foto-base64').value = fotoBase64;
+    document.getElementById('func-face-descriptor').value = JSON.stringify(descriptorArray);
+
+    statusEl.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i>Rosto detectado com sucesso! Biometria neural 128D gerada.';
+    statusEl.className = 'small text-success';
+
+  } catch (err) {
+    spinner.classList.add('d-none');
+    console.error('Erro na extração facial:', err);
+    statusEl.innerHTML = '<i class="fas fa-times-circle text-danger me-1"></i>Erro ao gerar biometria: ' + err.message;
+    statusEl.className = 'small text-danger';
+  }
+}
+
+// Salvar no Firestore
+async function salvarFuncionario(e) {
+  e.preventDefault();
+
+  const id = document.getElementById('func-id').value;
+  const nome = document.getElementById('func-nome').value.trim();
+  const cpfLimpo = document.getElementById('func-cpf').value.replace(/\D/g, '');
+  const cargo = document.getElementById('func-cargo').value.trim();
+  const departamento = document.getElementById('func-departamento').value.trim();
+  const email = document.getElementById('func-email').value.trim();
+  const ativo = document.getElementById('func-ativo').value === 'true';
+
+  const fotoUrl = document.getElementById('func-foto-base64').value;
+  const descriptorStr = document.getElementById('func-face-descriptor').value;
+  let faceDescriptor = null;
+
+  if (descriptorStr) {
+    try {
+      faceDescriptor = JSON.parse(descriptorStr);
+    } catch (_) {}
+  }
+
+  if (cpfLimpo.length !== 11) {
+    alert('O CPF deve ter exatamente 11 dígitos.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-salvar-modal');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Salvando no Firebase...';
+
+  try {
+    const dados = {
+      nome: nome,
+      cpf: cpfLimpo,
+      cargo: cargo,
+      departamento: departamento,
+      email: email,
+      ativo: ativo
+    };
+
+    if (fotoUrl) dados.fotoUrl = fotoUrl;
+    if (faceDescriptor) dados.faceDescriptor = faceDescriptor;
+
+    if (id) {
+      // Atualizar existente
+      dados.dataAtualizacao = Date.now();
+      await db.collection('funcionarios').doc(id).update(dados);
+    } else {
+      // Criar novo
+      dados.dataCadastro = Date.now();
+      await db.collection('funcionarios').add(dados);
+    }
+
+    fecharCameraAdmin();
+    modalFuncInstancia.hide();
+    carregarFuncionarios();
+    alert('Colaborador salvo com sucesso no Firestore!');
+
+  } catch (err) {
+    console.error('Erro ao salvar funcionário:', err);
+    alert('Erro ao salvar no Firestore: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save me-1"></i> Salvar Colaborador';
+  }
+}
+
+async function excluirFuncionario(id, nome) {
+  if (!confirm(`Deseja realmente EXCLUIR o colaborador "${nome}" do sistema?\n\nEsta ação removerá o cadastro e a biometria facial definitivamente.`)) {
+    return;
+  }
+
+  try {
+    await db.collection('funcionarios').doc(id).delete();
+    // Remove do cache imediatamente
+    listaFuncionariosCache = listaFuncionariosCache.filter(f => f.id !== id);
+    
+    // Recarrega as tabelas e métricas
+    await carregarFuncionarios();
+    await carregarDadosGerais();
+    alert(`Colaborador "${nome}" excluído com sucesso!`);
+  } catch (err) {
+    console.error('Erro ao excluir funcionário:', err);
+    alert('Erro ao excluir colaborador: ' + err.message);
+  }
+}
+
+// ─── Exportação de Registros (CSV) ────────────────────
+async function exportarCSV() {
+  try {
+    let registros = listaRegistrosCache;
+    if (!registros || registros.length === 0) {
+      const snap = await db.collection('registros').get();
+      registros = snap.docs.map(d => d.data());
+    }
+
+    if (!registros || registros.length === 0) {
+      alert('Nenhum registro encontrado para exportar.');
+      return;
+    }
+
+    // Ordena do mais recente para o mais antigo
+    registros.sort((a, b) => {
+      const ta = extrairData(a.timestamp)?.getTime() || 0;
+      const tb = extrairData(b.timestamp)?.getTime() || 0;
+      return tb - ta;
+    });
+
+    let csv = 'Data/Hora,Nome,CPF,Tipo,Confianca\n';
+    registros.forEach(r => {
+      const dt = extrairData(r.timestamp);
+      const dataHora = dt ? dt.toLocaleString('pt-BR') : '';
+      csv += `"${dataHora}","${r.funcionarioNome || ''}","${formatarCPF(r.cpf || '')}","${TIPOS_LABEL[r.tipo] || r.tipo}","${r.confianca || 95}%"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `registros_ponto_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.click();
+  } catch (err) {
+    console.error('Erro ao exportar CSV:', err);
+    alert('Erro ao exportar: ' + err.message);
+  }
+}
+
+// ─── Espelho de Ponto & Horas Extras ───────────────────
+function formatarHM(min, mostrarSinal = false) {
+  if (min === 0) return '0h 00m';
+  const sinal = min < 0 ? '-' : (mostrarSinal ? '+' : '');
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sinal}${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+function imprimirFolhaA4() {
+  window.print();
+}
+
+async function imprimirTodosA4() {
+  const selectFunc = document.getElementById('select-relatorio-func');
+  if (selectFunc) {
+    selectFunc.value = 'TODOS';
+  }
+  await gerarEspelho();
+  // Aguarda 350ms para garantir renderização do DOM antes de abrir o diálogo do navegador
+  setTimeout(() => {
+    window.print();
+  }, 350);
+}
+
+async function carregarOpcoesRelatorio() {
+  const select = document.getElementById('select-relatorio-func');
+  const inputMes = document.getElementById('select-relatorio-mes');
+  if (inputMes && !inputMes.value) {
+    const agora = new Date();
+    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  if (listaFuncionariosCache.length === 0) {
+    const snap = await db.collection('funcionarios').get();
+    listaFuncionariosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  if (listaFuncionariosCache.length === 0) {
+    select.innerHTML = '<option value="">Nenhum colaborador cadastrado</option>';
+    return;
+  }
+
+  const opcoesColaboradores = listaFuncionariosCache.map(f => 
+    `<option value="${f.cpf}">${f.nome} (CPF: ${formatarCPF(f.cpf)})</option>`
+  ).join('');
+
+  select.innerHTML = `
+    <option value="TODOS">📋 Todos os Colaboradores (Folha de Todos)</option>
+    ${opcoesColaboradores}
+  `;
+
+  // Seleciona automaticamente o primeiro colaborador por padrão para visualização rápida
+  if (!select.value || select.value === 'TODOS') {
+    select.value = listaFuncionariosCache[0].cpf;
+  }
+  await gerarEspelho();
+}
+
+// ─── Motor de Cálculo de Espelho por Colaborador ────────────────────────
+function calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados) {
+  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
+  const dataInicio = new Date(ano, mes - 1, 1, 0, 0, 0);
+  const dataFim = new Date(ano, mes, 0, 23, 59, 59, 999);
+  const diasMes = dataFim.getDate();
+  const tInicioMs = dataInicio.getTime();
+  const tFimMs = dataFim.getTime();
+
+  const registros = todosRegistros.filter(r => {
+    const rCpf = (r.cpf || '').replace(/\D/g, '');
+    const dt = extrairData(r.timestamp)?.getTime() || 0;
+    return rCpf === cleanCpf && dt >= tInicioMs && dt <= tFimMs;
+  });
+
+  const atestadosFunc = todosAtestados.filter(a => {
+    const aCpf = (a.cpf || '').replace(/\D/g, '');
+    return aCpf === cleanCpf;
+  });
+
+  let linhasHtml = '';
+  let totalMinutosTrabalhados = 0;
+  let totalMinutosPrevistos = 0;
+  let totalMinutosExtras = 0;
+  let totalMinutosAtrasos = 0;
+  let diasTrabalhados = 0;
+
+  for (let dia = 1; dia <= diasMes; dia++) {
+    const dataDia = new Date(ano, mes - 1, dia);
+    const diaFormatado = String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0');
+    const diaSemana = dataDia.getDay(); // 0 = Dom, 6 = Sáb
+    const nomeDiaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][diaSemana];
+    const isFimDeSemana = diaSemana === 0 || diaSemana === 6;
+
+    // Carga horária prevista do dia em minutos
+    let minutosPrevistos = 0;
+    if (jornadaTipo === '8h_seg_sex') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : 0;
+    } else if (jornadaTipo === '8h_seg_sex_4h_sab') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 480 : (diaSemana === 6 ? 240 : 0);
+    } else if (jornadaTipo === '6h_diarias') {
+      minutosPrevistos = (diaSemana >= 1 && diaSemana <= 5) ? 360 : 0;
+    }
+    totalMinutosPrevistos += minutosPrevistos;
+
+    const regsDia = registros.filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    const regEntrada = regsDia.find(r => r.tipo === 'entrada');
+    const regAlmocoSaida = regsDia.find(r => r.tipo === 'almoco_saida');
+    const regAlmocoRetorno = regsDia.find(r => r.tipo === 'almoco_retorno');
+    const regSaida = regsDia.find(r => r.tipo === 'saida');
+    const regsSaidaExtra = regsDia.filter(r => r.tipo === 'saida_extra');
+    const regsRetornoExtra = regsDia.filter(r => r.tipo === 'retorno_extra');
+
+    const entrada = regEntrada ? extrairData(regEntrada.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const almocoSaida = regAlmocoSaida ? extrairData(regAlmocoSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const almocoRetorno = regAlmocoRetorno ? extrairData(regAlmocoRetorno.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+    const saida = regSaida ? extrairData(regSaida.timestamp).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '--:--';
+
+    // Cálculo de minutos trabalhados
+    let minutosDia = 0;
+    const getMs = (r) => extrairData(r?.timestamp)?.getTime() || 0;
+
+    let minutosExtrasFora = 0;
+    let infoExtraTexto = '';
+    regsSaidaExtra.forEach((se, idx) => {
+      const re = regsRetornoExtra[idx];
+      const hSe = extrairData(se.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) || '';
+      const hRe = re ? extrairData(re.timestamp)?.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : 'em aberto';
+      if (re) {
+        const fora = Math.max(0, Math.round((getMs(re) - getMs(se)) / 60000));
+        minutosExtrasFora += fora;
+      }
+      infoExtraTexto += `${infoExtraTexto ? ', ' : ''}${hSe} às ${hRe}`;
+    });
+
+    if (regEntrada && regSaida) {
+      if (regAlmocoSaida && regAlmocoRetorno) {
+        minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000)) + 
+                     Math.max(0, Math.round((getMs(regSaida) - getMs(regAlmocoRetorno)) / 60000));
+      } else {
+        minutosDia = Math.max(0, Math.round((getMs(regSaida) - getMs(regEntrada)) / 60000));
+      }
+      minutosDia = Math.max(0, minutosDia - minutosExtrasFora);
+    } else if (regEntrada && regAlmocoSaida && !regSaida) {
+      minutosDia = Math.max(0, Math.round((getMs(regAlmocoSaida) - getMs(regEntrada)) / 60000) - minutosExtrasFora);
+    }
+
+    // Verifica se há atestado neste dia
+    const dataDiaStr = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    const atestadoDoDia = atestadosFunc.find(a => {
+      const ini = a.dataInicio || '';
+      const fim = a.dataFim || a.dataInicio || '';
+      return dataDiaStr >= ini && dataDiaStr <= fim;
+    });
+
+    let extrasDia = 0;
+    let atrasoDia = 0;
+
+    if (atestadoDoDia) {
+      atrasoDia = 0;
+      if (minutosDia > 0) {
+        diasTrabalhados++;
+        totalMinutosTrabalhados += minutosDia;
+        if (minutosDia > minutosPrevistos) {
+          extrasDia = minutosDia - minutosPrevistos;
+        }
+      }
+    } else if (regsDia.length > 0) {
+      diasTrabalhados++;
+      totalMinutosTrabalhados += minutosDia;
+
+      if (minutosPrevistos === 0) {
+        extrasDia = minutosDia;
+      } else {
+        if (minutosDia > minutosPrevistos) {
+          extrasDia = minutosDia - minutosPrevistos;
+        } else if (minutosDia < minutosPrevistos && regSaida) {
+          atrasoDia = minutosPrevistos - minutosDia;
+        }
+      }
+    }
+
+    totalMinutosExtras += extrasDia;
+    totalMinutosAtrasos += atrasoDia;
+
+    let totalTrabStr = '<span class="ponto-vazio">-</span>';
+    if (minutosDia > 0) {
+      totalTrabStr = `<strong>${formatarHM(minutosDia)}</strong>`;
+    } else if (regsDia.length > 0) {
+      totalTrabStr = `<span class="badge bg-info">Em andamento</span>`;
+    }
+
+    const cargaStr = minutosPrevistos > 0 ? `${minutosPrevistos / 60}h 00m` : '<span class="dia-semana-label">Folga</span>';
+    const extrasStr = extrasDia > 0 ? `<span class="badge bg-success">+${formatarHM(extrasDia)}</span>` : '<span class="ponto-vazio">-</span>';
+    
+    let saldoDiaStr = '<span class="ponto-vazio">-</span>';
+    if (extrasDia > 0) {
+      saldoDiaStr = `<strong class="text-success">+${formatarHM(extrasDia)}</strong>`;
+    } else if (atrasoDia > 0) {
+      saldoDiaStr = `<strong class="text-danger">-${formatarHM(atrasoDia)}</strong>`;
+    } else if (minutosDia > 0) {
+      saldoDiaStr = `<span class="dia-semana-label">0h 00m</span>`;
+    }
+
+    const extraTag = infoExtraTexto 
+      ? `<div class="tag-saida-extra no-print"><i class="fas fa-door-open me-1"></i>Extra: ${infoExtraTexto}</div>` 
+      : '';
+
+    let entradaCol = entrada;
+    let almocoSaidaCol = almocoSaida;
+    let almocoRetornoCol = almocoRetorno;
+    let saidaCol = saida;
+    let atestadoTag = '';
+
+    if (atestadoDoDia) {
+      atestadoTag = `<div class="small text-truncate mt-1" style="font-size:0.68rem;color:#f59e0b;"><i class="fas fa-file-medical me-1"></i>${atestadoDoDia.tipo || 'Atestado'}</div>`;
+      if (minutosDia === 0 && regsDia.length === 0) {
+        totalTrabStr = `<span class="badge border border-warning text-warning" style="background:rgba(245,158,11,0.12);font-size:0.72rem;">Abonado (${cargaStr})</span>`;
+        saldoDiaStr = `<span class="text-warning fw-bold small">Abonado</span>`;
+      }
+    }
+
+    linhasHtml += `
+      <tr class="${isFimDeSemana ? 'fim-de-semana' : ''}">
+        <td><strong class="folha-valor-destaque">${diaFormatado}</strong> <span class="dia-semana-label">(${nomeDiaSemana})</span>${extraTag}${atestadoTag}</td>
+        <td><span class="${entradaCol !== '--:--' ? 'text-success fw-bold' : 'ponto-vazio'}">${entradaCol}</span></td>
+        <td><span class="${almocoSaidaCol !== '--:--' ? 'text-warning fw-bold' : 'ponto-vazio'}">${almocoSaidaCol}</span></td>
+        <td><span class="${almocoRetornoCol !== '--:--' ? 'text-info fw-bold' : 'ponto-vazio'}">${almocoRetornoCol}</span></td>
+        <td><span class="${saidaCol !== '--:--' ? 'text-danger fw-bold' : 'ponto-vazio'}">${saidaCol}</span></td>
+        <td>${totalTrabStr}</td>
+        <td><span class="small">${cargaStr}</span></td>
+        <td>${extrasStr}</td>
+        <td>${saldoDiaStr}</td>
+        <td class="no-print text-center">
+          <button class="btn btn-sm btn-outline-warning p-1" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;" onclick="abrirModalAjusteDia('${cleanCpf}', '${dataDiaStr}', event)" title="Ajustar batidas ou atestado deste dia">
+            <i class="fas fa-edit" style="font-size:0.75rem;"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }
+
+  const saldoTotalMinutos = totalMinutosExtras - totalMinutosAtrasos;
+
+  return {
+    linhasHtml,
+    resumo: {
+      totalMinutosTrabalhados,
+      totalMinutosPrevistos,
+      totalMinutosExtras,
+      totalMinutosAtrasos,
+      saldoTotalMinutos,
+      diasTrabalhados
+    }
+  };
+}
+
+// ─── Renderizador de Folha A4 Individual ────────────────────────────────
+function renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dadosEspelho, dataEmissaoStr) {
+  const cleanCpf = (func.cpf || '').replace(/\D/g, '');
+  const nomeFunc = func.nome || 'Colaborador';
+  const cargoFunc = func.cargo || 'Não informado';
+  const depFunc = func.departamento || 'Geral';
+  const diasMes = new Date(ano, mes, 0).getDate();
+  const periodoStr = `01/${String(mes).padStart(2, '0')}/${ano} a ${String(diasMes).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+
+  const rotulosJornada = {
+    '8h_seg_sex': '8 horas diárias (Seg a Sex - 40h/sem)',
+    '8h_seg_sex_4h_sab': '8h Seg-Sex + 4h Sáb (44h/sem CLT)',
+    '6h_diarias': '6 horas diárias (Seg a Sex - 30h/sem)'
+  };
+  const jornadaRotulo = rotulosJornada[jornadaTipo] || '8 horas diárias';
+
+  const resumo = dadosEspelho.resumo;
+  const saldoSinal = resumo.saldoTotalMinutos >= 0 ? '+' : '-';
+  const saldoClasse = resumo.saldoTotalMinutos >= 0 ? 'text-success' : 'text-danger';
+
+  return `
+    <div class="folha-a4-individual">
+      <!-- Cabeçalho Oficial do Documento -->
+      <div class="cabecalho-folha-oficial mb-2 p-2 border border-secondary rounded bg-dark">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <h5 class="fw-bold mb-0 text-light text-uppercase">Espelho de Ponto Individual de Trabalho</h5>
+            <span class="text-accent small fw-bold"><i class="fas fa-clock me-1"></i> Mobilittà — Sistema de Ponto Eletrônico</span>
+          </div>
+          <div class="text-end small">
+            <div>Período: <strong class="folha-valor-destaque">${periodoStr}</strong></div>
+            <div>Emissão: <strong class="folha-valor-destaque">${dataEmissaoStr}</strong></div>
+          </div>
+        </div>
+        <div class="border-top border-secondary my-1 pt-1 row g-2 small">
+          <div class="col-4">Colaborador: <strong class="folha-valor-destaque">${nomeFunc}</strong></div>
+          <div class="col-4">CPF: <strong class="folha-valor-destaque">${formatarCPF(cleanCpf)}</strong></div>
+          <div class="col-4">Cargo: <strong class="folha-valor-destaque">${cargoFunc}</strong></div>
+          <div class="col-4">Departamento: <strong class="folha-valor-destaque">${depFunc}</strong></div>
+          <div class="col-8">Regime / Carga: <strong class="folha-valor-destaque">${jornadaRotulo}</strong></div>
+        </div>
+      </div>
+
+      <!-- Tabela Detalhada com Horas Extras e Saldos -->
+      <div class="table-responsive">
+        <table class="admin-table tabela-folha-a4">
+          <thead>
+            <tr>
+              <th style="width: 13%;">Dia</th>
+              <th style="width: 10%;">Entrada</th>
+              <th style="width: 11%;">Saída Almoço</th>
+              <th style="width: 11%;">Ret. Almoço</th>
+              <th style="width: 10%;">Saída</th>
+              <th style="width: 11%;">Total Trab.</th>
+              <th style="width: 10%;">Carga</th>
+              <th style="width: 11%;">H. Extras (+)</th>
+              <th style="width: 10%;">Saldo Dia</th>
+              <th style="width: 5%;" class="no-print text-center">Ajuste</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dadosEspelho.linhasHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Mini Resumo de Totais no Rodapé da Tabela -->
+      <div class="resumo-folha-rodape">
+        <div>Total Trab.: <strong>${formatarHM(resumo.totalMinutosTrabalhados)}</strong></div>
+        <div>Carga Prevista: <strong>${formatarHM(resumo.totalMinutosPrevistos)}</strong></div>
+        <div>Horas Extras (+): <strong class="text-success">+${formatarHM(resumo.totalMinutosExtras)}</strong></div>
+        <div>Atrasos/Faltas (-): <strong class="text-danger">-${formatarHM(resumo.totalMinutosAtrasos)}</strong></div>
+        <div>Saldo do Mês: <strong class="${saldoClasse}">${saldoSinal}${formatarHM(Math.abs(resumo.saldoTotalMinutos))}</strong></div>
+      </div>
+
+      <!-- Termo de Declaração e Bloco de Assinatura para Conferência -->
+      <div class="bloco-assinaturas mt-2 pt-2 border-top border-secondary">
+        <p class="small text-center mb-4 fst-italic texto-declaracao-folha">
+          "Reconheço a exatidão das anotações constantes neste espelho de ponto referente ao período indicado, concordando com as horas normais, horas extras e saldos apurados."
+        </p>
+        <div class="row text-center g-4 pt-1">
+          <div class="col-6">
+            <div class="linha-assinatura">
+              <strong class="d-block nome-assinatura">${nomeFunc}</strong>
+              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="linha-assinatura">
+              <strong class="d-block nome-assinatura">Assinatura do Empregador / RH</strong>
+              <span class="small data-assinatura">Data: _____ / _____ / ________</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function atualizarCardsResumoTopo(resumo) {
+  const elTotalHoras = document.getElementById('total-horas-mes');
+  if (elTotalHoras) elTotalHoras.textContent = formatarHM(resumo.totalMinutosTrabalhados);
+
+  const elCargaPrevista = document.getElementById('total-carga-prevista-mes');
+  if (elCargaPrevista) elCargaPrevista.textContent = formatarHM(resumo.totalMinutosPrevistos);
+
+  const elHorasExtras = document.getElementById('total-horas-extras-mes');
+  if (elHorasExtras) elHorasExtras.textContent = `+${formatarHM(resumo.totalMinutosExtras)}`;
+
+  const elAtrasos = document.getElementById('total-atrasos-mes');
+  if (elAtrasos) elAtrasos.textContent = `-${formatarHM(resumo.totalMinutosAtrasos)}`;
+
+  const elSaldoHoras = document.getElementById('saldo-horas-mes');
+  if (elSaldoHoras) {
+    if (resumo.saldoTotalMinutos >= 0) {
+      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-success';
+      elSaldoHoras.textContent = `+${formatarHM(resumo.saldoTotalMinutos)}`;
+    } else {
+      elSaldoHoras.className = 'fw-bold mb-0 mt-1 text-danger';
+      elSaldoHoras.textContent = `-${formatarHM(Math.abs(resumo.saldoTotalMinutos))}`;
+    }
+  }
+}
+
+// ─── Geração Principal (Individual ou em Lote de Todos) ───────────────────
+async function gerarEspelho() {
+  const selectFunc = document.getElementById('select-relatorio-func');
+  const inputMes = document.getElementById('select-relatorio-mes');
+  const selectJornada = document.getElementById('select-relatorio-jornada');
+  const containerFolhas = document.getElementById('folha-impressao-a4');
+  const resumoCards = document.getElementById('resumo-horas-mes');
+
+  if (!inputMes.value) {
+    const agora = new Date();
+    inputMes.value = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  const funcSelecionado = selectFunc ? selectFunc.value : '';
+  const mesAno = inputMes ? inputMes.value : '';
+  const jornadaTipo = selectJornada ? selectJornada.value : '8h_seg_sex';
+
+  if (!funcSelecionado || !mesAno) {
+    if (containerFolhas) {
+      containerFolhas.innerHTML = '<div class="text-center py-4 text-muted">Selecione um colaborador e mês acima.</div>';
+    }
+    return;
+  }
+
+  const [ano, mes] = mesAno.split('-').map(Number);
+  const dataEmissaoStr = new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+
+  if (containerFolhas) {
+    containerFolhas.innerHTML = '<div class="text-center py-5 text-muted no-print"><i class="fas fa-spinner fa-spin fa-2x mb-3 text-accent"></i><br>Carregando registros e apurando espelhos de ponto...</div>';
+  }
+
+  try {
+    const [snapReg, snapAtestados] = await Promise.all([
+      db.collection('registros').get(),
+      db.collection('atestados').get()
+    ]);
+
+    const todosRegistros = snapReg.docs.map(d => ({ id: d.id, ...d.data() }));
+    const todosAtestados = snapAtestados.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    if (funcSelecionado === 'TODOS') {
+      // ── MODO TODOS OS COLABORADORES (IMPRESSÃO EM LOTE) ──
+      const funcsAtivos = listaFuncionariosCache.filter(f => f.ativo !== false);
+      if (funcsAtivos.length === 0) {
+        containerFolhas.innerHTML = '<div class="alert alert-warning">Nenhum colaborador ativo encontrado para geração do espelho.</div>';
+        return;
+      }
+
+      if (resumoCards) resumoCards.classList.add('d-none');
+
+      let htmlTodasFolhas = `
+        <div class="alert alert-primary no-print d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <i class="fas fa-users me-2"></i>
+            <strong>Modo Todos os Colaboradores:</strong> Visualizando espelho de ponto de <strong>${funcsAtivos.length}</strong> colaboradores do mês <strong>${String(mes).padStart(2,'0')}/${ano}</strong>.
+          </div>
+          <button class="btn btn-sm btn-success" onclick="imprimirFolhaA4()">
+            <i class="fas fa-print me-1"></i> Imprimir Todos Agora (Lote)
+          </button>
+        </div>
+      `;
+
+      funcsAtivos.forEach((func) => {
+        const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
+        htmlTodasFolhas += renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
+      });
+
+      containerFolhas.innerHTML = htmlTodasFolhas;
+    } else {
+      // ── MODO COLABORADOR INDIVIDUAL ──
+      if (resumoCards) resumoCards.classList.remove('d-none');
+      const cleanCpf = funcSelecionado.replace(/\D/g, '');
+      const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cleanCpf) || {
+        cpf: cleanCpf,
+        nome: 'Colaborador',
+        cargo: 'Não informado',
+        departamento: 'Geral'
+      };
+
+      const dados = calcularDadosEspelhoFuncionario(func, ano, mes, jornadaTipo, todosRegistros, todosAtestados);
+      containerFolhas.innerHTML = renderizarFolhaIndividualHtml(func, ano, mes, jornadaTipo, dados, dataEmissaoStr);
+
+      atualizarCardsResumoTopo(dados.resumo);
+    }
+  } catch (err) {
+    console.error('Erro ao gerar espelho:', err);
+    if (containerFolhas) {
+      containerFolhas.innerHTML = `<div class="alert alert-danger py-4 text-center">Erro ao calcular espelho: ${err.message}</div>`;
+    }
+  }
+}
+
+// ─── Utilitários ──────────────────────────────────────
+function formatarCPF(v) {
+  const d = v.replace(/\D/g, '');
+  if (d.length !== 11) return v;
+  return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+function mascaraCPFModal(input) {
+  let v = input.value.replace(/\D/g, '').slice(0, 11);
+  v = v.replace(/(\d{3})(\d)/, '$1.$2');
+  v = v.replace(/(\d{3})(\d)/, '$1.$2');
+  v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  input.value = v;
+}
+
+function verFotoAmpliada(src, legenda) {
+  document.getElementById('modal-foto-img').src = src;
+  document.getElementById('modal-foto-legenda').textContent = legenda;
+  modalFotoInstancia.show();
+}
+
+
+// ============================================================
+// ─── GESTÃO DE ATESTADOS E JUSTIFICATIVAS ────────────────────
+// ============================================================
+
+async function carregarAtestados() {
+  const tbody = document.getElementById('tabela-atestados-corpo');
+  if (!tbody || !db) return;
+
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Carregando atestados...</td></tr>';
+
+  try {
+    const snap = await db.collection('atestados').get();
+    listaAtestadosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Ordena do mais recente para o mais antigo
+    listaAtestadosCache.sort((a, b) => {
+      const da = a.dataInicio || '';
+      const dbDate = b.dataInicio || '';
+      return dbDate.localeCompare(da);
+    });
+
+    renderizarTabelaAtestados(listaAtestadosCache);
+  } catch (err) {
+    console.error('Erro ao carregar atestados:', err);
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Erro ao carregar atestados: ${err.message}</td></tr>`;
+  }
+}
+
+function renderizarTabelaAtestados(lista) {
+  const tbody = document.getElementById('tabela-atestados-corpo');
+  const badgeTotal = document.getElementById('badge-total-atestados');
+  if (badgeTotal) badgeTotal.textContent = `${lista.length} atestado${lista.length === 1 ? '' : 's'}`;
+
+  if (!lista || lista.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Nenhum atestado ou justificativa cadastrada ainda.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = lista.map(at => {
+    const dataIni = at.dataInicio ? at.dataInicio.split('-').reverse().join('/') : '--';
+    const dataFim = at.dataFim ? at.dataFim.split('-').reverse().join('/') : dataIni;
+    const periodoStr = dataIni === dataFim ? dataIni : `${dataIni} até ${dataFim}`;
+
+    let diasDuracao = 1;
+    if (at.dataInicio && at.dataFim) {
+      const msDiff = new Date(at.dataFim).getTime() - new Date(at.dataInicio).getTime();
+      diasDuracao = Math.max(1, Math.round(msDiff / (1000 * 60 * 60 * 24)) + 1);
+    }
+
+    return `
+      <tr>
+        <td>
+          <strong class="text-light fs-6">${at.funcionarioNome || 'Colaborador'}</strong>
+          <div class="text-muted small">CPF: ${formatarCPF(at.cpf || '')}</div>
+        </td>
+        <td>
+          <span class="badge border border-warning text-warning" style="background: rgba(245,158,11,0.12);">
+            <i class="fas fa-file-medical me-1"></i>${at.tipo || 'Atestado'}
+          </span>
+        </td>
+        <td><strong class="text-light">${periodoStr}</strong></td>
+        <td><span class="badge bg-secondary">${diasDuracao} dia${diasDuracao === 1 ? '' : 's'}</span></td>
+        <td>
+          <span class="text-light">${at.motivo || '-'}</span>
+        </td>
+        <td>
+          <span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Abonado</span>
+        </td>
+        <td class="text-center">
+          <button class="btn btn-outline-danger btn-sm p-1 px-2" onclick="excluirAtestado('${at.id}', '${at.funcionarioNome || ''} - ${periodoStr}')" title="Excluir atestado">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filtrarAtestados() {
+  const busca = (document.getElementById('filtro-atestado-busca')?.value || '').toLowerCase().trim();
+  if (!busca) {
+    renderizarTabelaAtestados(listaAtestadosCache);
+    return;
+  }
+  const filtrados = listaAtestadosCache.filter(at => {
+    const nome = (at.funcionarioNome || '').toLowerCase();
+    const cpf = (at.cpf || '').replace(/\D/g, '');
+    const motivo = (at.motivo || '').toLowerCase();
+    const tipo = (at.tipo || '').toLowerCase();
+    return nome.includes(busca) || cpf.includes(busca) || motivo.includes(busca) || tipo.includes(busca);
+  });
+  renderizarTabelaAtestados(filtrados);
+}
+
+function preencherSelectColaboradores(selectId, cpfSelecionado) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = '<option value="">-- Selecione o colaborador --</option>';
+
+  const ativos = listaFuncionariosCache.filter(f => f.ativo !== false);
+  ativos.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.cpf;
+    opt.dataset.id = f.id;
+    opt.dataset.nome = f.nome;
+    opt.dataset.cargo = f.cargo || '';
+    opt.dataset.departamento = f.departamento || '';
+    opt.textContent = `${f.nome} (CPF: ${formatarCPF(f.cpf)})`;
+    if (cpfSelecionado && f.cpf === cpfSelecionado) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function abrirModalAtestado() {
+  preencherSelectColaboradores('atestado-func-select');
+  const hojeStr = new Date().toISOString().split('T')[0];
+  document.getElementById('atestado-data-inicio').value = hojeStr;
+  document.getElementById('atestado-data-fim').value = hojeStr;
+  document.getElementById('atestado-motivo').value = '';
+  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
+}
+
+function abrirModalAtestadoParaFuncionario() {
+  const selectEspelho = document.getElementById('select-relatorio-func');
+  const cpfAtual = selectEspelho ? selectEspelho.value : '';
+  preencherSelectColaboradores('atestado-func-select', cpfAtual);
+
+  const mesAnoInput = document.getElementById('select-relatorio-mes')?.value;
+  let dataSugerida = new Date().toISOString().split('T')[0];
+  if (mesAnoInput) {
+    const partes = mesAnoInput.split('-');
+    dataSugerida = `${partes[0]}-${partes[1]}-01`;
+  }
+
+  document.getElementById('atestado-data-inicio').value = dataSugerida;
+  document.getElementById('atestado-data-fim').value = dataSugerida;
+  document.getElementById('atestado-motivo').value = '';
+  if (modalAtestadoInstancia) modalAtestadoInstancia.show();
+}
+
+async function salvarNovoAtestado(e) {
+  e.preventDefault();
+  const select = document.getElementById('atestado-func-select');
+  const cpf = select.value;
+  if (!cpf) {
+    alert('Por favor, selecione o colaborador.');
+    return;
+  }
+
+  const opt = select.selectedOptions[0];
+  const funcNome = opt.dataset.nome || '';
+  const funcId = opt.dataset.id || '';
+  const dataInicio = document.getElementById('atestado-data-inicio').value;
+  const dataFim = document.getElementById('atestado-data-fim').value;
+  const tipo = document.getElementById('atestado-tipo-select').value;
+  const motivo = document.getElementById('atestado-motivo').value.trim();
+
+  if (dataFim < dataInicio) {
+    alert('A Data Fim não pode ser anterior à Data Início.');
+    return;
+  }
+
+  try {
+    await db.collection('atestados').add({
+      cpf: cpf,
+      funcionarioId: funcId,
+      funcionarioNome: funcNome,
+      dataInicio: dataInicio,
+      dataFim: dataFim,
+      tipo: tipo,
+      motivo: motivo,
+      abonado: true,
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+    });
+
+    if (modalAtestadoInstancia) modalAtestadoInstancia.hide();
+    mostrarToastSucesso('Atestado / Justificativa registrada com sucesso!');
+
+    carregarAtestados();
+    // Se a tela de espelho estiver visível para o mesmo funcionário, atualiza
+    const selectEspelho = document.getElementById('select-relatorio-func');
+    if (selectEspelho && selectEspelho.value === cpf) {
+      gerarEspelho();
+    }
+  } catch (err) {
+    console.error('Erro ao salvar atestado:', err);
+    alert('Erro ao salvar no Firebase: ' + err.message);
+  }
+}
+
+async function excluirAtestado(id, desc) {
+  if (!confirm(`Deseja realmente excluir este atestado?\n\n${desc}`)) return;
+
+  try {
+    await db.collection('atestados').doc(id).delete();
+    mostrarToastSucesso('Atestado excluído com sucesso.');
+    carregarAtestados();
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao excluir atestado:', err);
+    alert('Erro ao excluir: ' + err.message);
+  }
+}
+
+// ============================================================
+// ─── AJUSTE DE HORÁRIOS DO DIA (ESQUECIMENTO / CORREÇÃO) ────
+// ============================================================
+
+async function abrirModalAjusteDia(cpf, dataStr, ev) {
+  if (ev) ev.stopPropagation();
+
+  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, ''));
+  const nomeFunc = func ? func.nome : 'Colaborador';
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  const dataFormatada = `${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}`;
+
+  document.getElementById('ajuste-dia-cpf').value = cpf;
+  document.getElementById('ajuste-dia-data').value = dataStr;
+  document.getElementById('ajuste-dia-nome').textContent = nomeFunc;
+  document.getElementById('ajuste-dia-data-label').textContent = dataFormatada;
+
+  // Limpa inputs
+  ['entrada', 'almoco-saida', 'almoco-retorno', 'saida', 'saida-extra', 'retorno-extra'].forEach(tipo => {
+    document.getElementById(`ajuste-dia-${tipo}`).value = '';
+  });
+
+  document.getElementById('ajuste-dia-check-atestado').checked = false;
+  document.getElementById('ajuste-dia-box-atestado').classList.add('d-none');
+  document.getElementById('ajuste-dia-atestado-desc').value = '';
+
+  // Busca batidas deste dia para preencher horários existentes
+  try {
+    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
+    const regsDia = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    regsDia.forEach(r => {
+      const dt = extrairData(r.timestamp);
+      if (!dt) return;
+      const horaStr = dt.toTimeString().slice(0, 5); // "HH:mm"
+      if (r.tipo === 'entrada') document.getElementById('ajuste-dia-entrada').value = horaStr;
+      if (r.tipo === 'almoco_saida') document.getElementById('ajuste-dia-almoco-saida').value = horaStr;
+      if (r.tipo === 'almoco_retorno') document.getElementById('ajuste-dia-almoco-retorno').value = horaStr;
+      if (r.tipo === 'saida') document.getElementById('ajuste-dia-saida').value = horaStr;
+      if (r.tipo === 'saida_extra') document.getElementById('ajuste-dia-saida-extra').value = horaStr;
+      if (r.tipo === 'retorno_extra') document.getElementById('ajuste-dia-retorno-extra').value = horaStr;
+    });
+
+    // Verifica se já tem atestado neste dia
+    const snapAt = await db.collection('atestados').where('cpf', '==', cpf).get();
+    const at = snapAt.docs.map(d => d.data()).find(a => {
+      const ini = a.dataInicio || '';
+      const fim = a.dataFim || a.dataInicio || '';
+      return dataStr >= ini && dataStr <= fim;
+    });
+
+    if (at) {
+      document.getElementById('ajuste-dia-check-atestado').checked = true;
+      document.getElementById('ajuste-dia-box-atestado').classList.remove('d-none');
+      document.getElementById('ajuste-dia-atestado-tipo').value = at.tipo || 'Atestado Médico (Abonar Dia)';
+      document.getElementById('ajuste-dia-atestado-desc').value = at.motivo || '';
+    }
+
+  } catch (err) {
+    console.warn('Erro ao carregar batidas do dia:', err);
+  }
+
+  if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.show();
+}
+
+function toggleAtestadoNoAjuste(checked) {
+  const box = document.getElementById('ajuste-dia-box-atestado');
+  if (!box) return;
+  if (checked) box.classList.remove('d-none');
+  else box.classList.add('d-none');
+}
+
+async function salvarAjusteDia(e) {
+  e.preventDefault();
+  const cpf = document.getElementById('ajuste-dia-cpf').value;
+  const dataStr = document.getElementById('ajuste-dia-data').value;
+  const motivo = document.getElementById('ajuste-dia-motivo').value;
+
+  const func = listaFuncionariosCache.find(f => (f.cpf || '').replace(/\D/g, '') === cpf.replace(/\D/g, '')) || {};
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+
+  const horarios = {
+    entrada: document.getElementById('ajuste-dia-entrada').value,
+    almoco_saida: document.getElementById('ajuste-dia-almoco-saida').value,
+    almoco_retorno: document.getElementById('ajuste-dia-almoco-retorno').value,
+    saida: document.getElementById('ajuste-dia-saida').value,
+    saida_extra: document.getElementById('ajuste-dia-saida-extra').value,
+    retorno_extra: document.getElementById('ajuste-dia-retorno-extra').value
+  };
+
+  try {
+    // 1. Busca os registros existentes deste dia
+    const snap = await db.collection('registros').where('cpf', '==', cpf).get();
+    const regsExistentes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => {
+      const dt = extrairData(r.timestamp);
+      return dt && dt.getDate() === dia && dt.getMonth() === (mes - 1) && dt.getFullYear() === ano;
+    });
+
+    // 2. Para cada tipo, insere, atualiza ou apaga se estiver em branco
+    for (const [tipo, horaVal] of Object.entries(horarios)) {
+      const regAtual = regsExistentes.find(r => r.tipo === tipo);
+
+      if (horaVal) {
+        const [h, m] = horaVal.split(':').map(Number);
+        const dataBatida = new Date(ano, mes - 1, dia, h, m, 0);
+        const ts = firebase.firestore.Timestamp.fromDate(dataBatida);
+
+        if (regAtual) {
+          // Atualiza registro existente
+          await db.collection('registros').doc(regAtual.id).update({
+            timestamp: ts,
+            ajusteManual: true,
+            justificativa: motivo,
+            atualizadoPor: sessionStorage.getItem('admin_email') || 'admin'
+          });
+        } else {
+          // Insere nova batida manual
+          await db.collection('registros').add({
+            cpf: cpf,
+            funcionarioId: func.id || '',
+            funcionarioNome: func.nome || 'Colaborador',
+            cargo: func.cargo || '',
+            departamento: func.departamento || '',
+            tipo: tipo,
+            tipoLabel: TIPOS_LABEL[tipo] || tipo,
+            timestamp: ts,
+            confianca: 100,
+            ajusteManual: true,
+            justificativa: motivo,
+            criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+          });
+        }
+      } else if (regAtual) {
+        // Se o campo foi esvaziado pelo admin, remove a batida
+        await db.collection('registros').doc(regAtual.id).delete();
+      }
+    }
+
+    // 3. Trata Atestado se selecionado
+    const checkAtestado = document.getElementById('ajuste-dia-check-atestado').checked;
+    if (checkAtestado) {
+      const atTipo = document.getElementById('ajuste-dia-atestado-tipo').value;
+      const atDesc = document.getElementById('ajuste-dia-atestado-desc').value.trim() || 'Atestado / Justificativa';
+
+      await db.collection('atestados').add({
+        cpf: cpf,
+        funcionarioId: func.id || '',
+        funcionarioNome: func.nome || 'Colaborador',
+        dataInicio: dataStr,
+        dataFim: dataStr,
+        tipo: atTipo,
+        motivo: atDesc,
+        abonado: true,
+        criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+        criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+      });
+    }
+
+    if (modalAjusteDiaInstancia) modalAjusteDiaInstancia.hide();
+    mostrarToastSucesso('Horários do dia atualizados com sucesso!');
+
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao salvar ajuste do dia:', err);
+    alert('Erro ao salvar alterações: ' + err.message);
+  }
+}
+
+// ============================================================
+// ─── INSERÇÃO DE PONTO MANUAL AVULSO ────────────────────────
+// ============================================================
+
+function abrirModalPontoManual() {
+  const selectEspelho = document.getElementById('select-relatorio-func');
+  const cpfAtual = selectEspelho ? selectEspelho.value : '';
+  preencherSelectColaboradores('ponto-manual-func', cpfAtual);
+
+  const agora = new Date();
+  document.getElementById('ponto-manual-data').value = agora.toISOString().split('T')[0];
+  document.getElementById('ponto-manual-hora').value = agora.toTimeString().slice(0, 5);
+  document.getElementById('ponto-manual-motivo').value = 'Esquecimento de registro pelo colaborador';
+
+  if (modalPontoManualInstancia) modalPontoManualInstancia.show();
+}
+
+async function salvarPontoManualAvulso(e) {
+  e.preventDefault();
+  const select = document.getElementById('ponto-manual-func');
+  const cpf = select.value;
+  if (!cpf) {
+    alert('Por favor, selecione o colaborador.');
+    return;
+  }
+
+  const opt = select.selectedOptions[0];
+  const funcNome = opt.dataset.nome || '';
+  const funcId = opt.dataset.id || '';
+  const funcCargo = opt.dataset.cargo || '';
+  const funcDep = opt.dataset.departamento || '';
+
+  const dataStr = document.getElementById('ponto-manual-data').value;
+  const horaStr = document.getElementById('ponto-manual-hora').value;
+  const tipo = document.getElementById('ponto-manual-tipo').value;
+  const motivo = document.getElementById('ponto-manual-motivo').value.trim();
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  const [h, m] = horaStr.split(':').map(Number);
+  const dataCompleta = new Date(ano, mes - 1, dia, h, m, 0);
+
+  try {
+    await db.collection('registros').add({
+      cpf: cpf,
+      funcionarioId: funcId,
+      funcionarioNome: funcNome,
+      cargo: funcCargo,
+      departamento: funcDep,
+      tipo: tipo,
+      tipoLabel: TIPOS_LABEL[tipo] || tipo,
+      timestamp: firebase.firestore.Timestamp.fromDate(dataCompleta),
+      confianca: 100,
+      ajusteManual: true,
+      justificativa: motivo,
+      criadoPor: sessionStorage.getItem('admin_email') || 'admin'
+    });
+
+    if (modalPontoManualInstancia) modalPontoManualInstancia.hide();
+    mostrarToastSucesso('Ponto manual inserido com sucesso!');
+
+    gerarEspelho();
+    carregarDadosGerais();
+  } catch (err) {
+    console.error('Erro ao salvar ponto manual:', err);
+    alert('Erro ao salvar no Firebase: ' + err.message);
+  }
+}
+
+async function excluirRegistroPonto(id, nome, hora, ev) {
+  if (ev) ev.stopPropagation();
+
+  if (!confirm(`Deseja realmente excluir esta batida de ponto?\n\nColaborador: ${nome}\nHorário: ${hora}`)) return;
+
+  try {
+    await db.collection('registros').doc(id).delete();
+    mostrarToastSucesso('Batida de ponto excluída com sucesso.');
+    carregarDadosGerais();
+    gerarEspelho();
+  } catch (err) {
+    console.error('Erro ao excluir registro:', err);
+    alert('Erro ao excluir batida: ' + err.message);
+  }
+}
+
+function mostrarToastSucesso(msg) {
+  alert(msg);
+}
