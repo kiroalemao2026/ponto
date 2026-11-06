@@ -506,7 +506,7 @@ async function processarFotoBiometria(fotoBase64) {
   try {
     const imgElement = await faceapi.fetchImage(fotoBase64);
     const deteccao = await faceapi
-      .detectSingleFace(imgElement, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+      .detectSingleFace(imgElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
       .withFaceLandmarks()
       .withFaceDescriptor();
 

@@ -123,9 +123,14 @@
             <span class="text-muted" style="font-size:.85rem">Colaborador:</span>
             <strong class="text-light ms-1" id="nome-sessao"></strong>
           </div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="voltarCPF()">
-            <i class="fas fa-times"></i> Trocar CPF
-          </button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-warning" onclick="alternarCamera()" title="Alternar entre câmera frontal e traseira">
+              <i class="fas fa-sync-alt"></i> Alternar Câmera
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="voltarCPF()">
+              <i class="fas fa-times"></i> Trocar CPF
+            </button>
+          </div>
         </div>
 
         <div class="camera-wrapper">
