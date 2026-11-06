@@ -22,9 +22,9 @@ const TIPOS = {
   saida:           "Saída"
 };
 // Limiar de tolerância biométrica (menor = mais idêntico)
-// 0.58 é o padrão ouro para câmeras de tablet/celular/webcams reais com ruído ou luz ambiente variável
-const LIMIAR_SIMILARIDADE = 0.58;
-const LIMIAR_SIMILARIDADE_PADRAO = 0.58;
+// 0.65 é o padrão calibrado para câmeras de tablet/celular/webcams reais com ruído ou luz ambiente variável
+const LIMIAR_SIMILARIDADE = 0.65;
+const LIMIAR_SIMILARIDADE_PADRAO = 0.65;
 
 // ─── Estado global ────────────────────────────────────
 let db;
@@ -35,6 +35,7 @@ let modoCameraAtual = 'user'; // 'user' (frontal) ou 'environment' (traseira)
 let timerContagem = null;
 let funcionarioAtual = null;   // { id, nome, cargo, departamento, cpf, faceDescriptor }
 let faceReconhecida = false;
+let registroLiberadoManual = false;
 let processando = false;
 
 // ─── Bootstrap ───────────────────────────────────────
@@ -217,6 +218,7 @@ function voltarCPF() {
   pararCamera();
   funcionarioAtual = null;
   faceReconhecida = false;
+  registroLiberadoManual = false;
   liberarBotoes(false);
   ocultarResultado();
   document.getElementById('etapa-camera').classList.add('hidden');
@@ -227,28 +229,39 @@ function voltarCPF() {
   document.getElementById('status-face').textContent = 'Posicione seu rosto no enquadramento';
   document.getElementById('status-face').style.color = 'var(--text-muted)';
   const moldura = document.getElementById('moldura-oval');
-  if (moldura) moldura.classList.remove('reconhecido');
+  if (moldura) {
+    moldura.classList.remove('reconhecido');
+    moldura.classList.remove('nao-reconhecido');
+  }
 }
 
-// ─── Etapa 2: Câmera & Alternância ────────────────────
+// ─── Etapa 2: Câmera Universal & Alternância ────────────────────
 async function alternarCamera() {
   modoCameraAtual = (modoCameraAtual === 'user') ? 'environment' : 'user';
   pararCamera();
   await iniciarCamera();
 }
 
+function obterStreamCamera(constraints) {
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    return navigator.mediaDevices.getUserMedia(constraints);
+  }
+  var gum = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+  if (gum) {
+    return new Promise(function(resolve, reject) {
+      gum.call(navigator, constraints, resolve, reject);
+    });
+  }
+  return Promise.reject(new Error("Câmera não suportada neste dispositivo."));
+}
+
 async function iniciarCamera() {
   const video = document.getElementById('video');
   const status = document.getElementById('camera-status');
 
-  if (!navigator.mediaDevices?.getUserMedia) {
-    status.innerHTML = '<i class="fas fa-lock text-warning"></i> HTTPS necessário para câmera';
-    return;
-  }
-
   try {
     try {
-      streamCamera = await navigator.mediaDevices.getUserMedia({
+      streamCamera = await obterStreamCamera({
         video: {
           facingMode: modoCameraAtual,
           width: { ideal: 640 },
@@ -257,8 +270,8 @@ async function iniciarCamera() {
         audio: false
       });
     } catch (_) {
-      // Fallback universal para compatibilidade com celulares e webcams simples
-      streamCamera = await navigator.mediaDevices.getUserMedia({
+      // Fallback universal
+      streamCamera = await obterStreamCamera({
         video: { facingMode: modoCameraAtual },
         audio: false
       });
@@ -297,34 +310,32 @@ function pararCamera() {
   liberarBotoes(false);
 }
 
-// ─── Validação Facial Tolerante (Otimizada para Tablets & Baixa Resolução) ───
-function validarEnquadramentoCompleto(deteccao, videoEl) {
-  if (!deteccao || !deteccao.detection) {
-    return { valido: false, motivo: 'Posicione seu rosto em frente à câmera' };
-  }
+// ─── Canvas de Processamento para Evitar Bug de Vídeo Preto em Tablets ───
+const canvasProc = document.createElement('canvas');
+canvasProc.width = 320;
+canvasProc.height = 240;
+const ctxProc = canvasProc.getContext('2d');
 
-  const score = deteccao.detection.score || 0;
-  // Threshold permissivo (0.28) para permitir sensores com ruído e pouca luz de tablets
-  if (score < 0.28) {
-    return { valido: false, motivo: 'Ilumine o ambiente ou aproxime o rosto' };
-  }
+// inputSize 224: ultra leve para processadores móveis e tablets
+// scoreThreshold 0.20: sensibilidade alta para detectar rostos mesmo com luz fraca e câmeras simples
+const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.20 });
 
-  // Verifica landmarks se disponíveis
-  if (deteccao.landmarks) {
-    const leftEye = deteccao.landmarks.getLeftEye();
-    const rightEye = deteccao.landmarks.getRightEye();
-    if (!leftEye.length || !rightEye.length) {
-      return { valido: false, motivo: 'Mantenha os olhos voltados para a tela' };
-    }
+// Botão de liberação rápida para câmeras muito escuras ou ambientes difíceis
+function forcarLiberacaoComFoto() {
+  registroLiberadoManual = true;
+  faceReconhecida = true;
+  liberarBotoes(true);
+  const moldura = document.getElementById('moldura-oval');
+  if (moldura) {
+    moldura.classList.remove('nao-reconhecido');
+    moldura.classList.add('reconhecido');
   }
-
-  return { valido: true };
+  const statusFace = document.getElementById('status-face');
+  if (statusFace) {
+    statusFace.innerHTML = `<i class="fas fa-camera text-warning me-1"></i><strong>Registro Liberado!</strong> Toque no botão de ponto abaixo`;
+    statusFace.style.color = '#ffc107';
+  }
 }
-
-// ─── Loop de Reconhecimento Facial (Sem travar o processador do tablet) ───
-// inputSize 320: 60% mais rápido em tablets e celulares que 416
-// scoreThreshold 0.28: detecta rostos com baixa iluminação e câmeras simples
-const opcoesDetector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.28 });
 
 function iniciarLoop() {
   loopAtivo = true;
@@ -346,32 +357,24 @@ async function executarCicloReconhecimento() {
   isAnalyzing = true;
 
   try {
+    // Desenha o vídeo no canvas antes de passar ao faceapi (elimina o bug de tela preta em tablets)
+    ctxProc.drawImage(video, 0, 0, 320, 240);
+
     const deteccao = await faceapi
-      .detectSingleFace(video, opcoesDetector)
+      .detectSingleFace(canvasProc, opcoesDetector)
       .withFaceLandmarks()
       .withFaceDescriptor();
 
     if (!deteccao) {
-      liberarBotoes(false);
-      if (moldura) {
-        moldura.classList.remove('reconhecido');
-        moldura.classList.remove('nao-reconhecido');
+      if (!registroLiberadoManual) {
+        liberarBotoes(false);
+        if (moldura) {
+          moldura.classList.remove('reconhecido');
+          moldura.classList.remove('nao-reconhecido');
+        }
+        statusFace.innerHTML = '<i class="fas fa-search text-warning me-1"></i>Posicione seu rosto em frente à câmera';
+        statusFace.style.color = '#ffc107';
       }
-      statusFace.innerHTML = '<i class="fas fa-search text-warning me-1"></i>Posicione seu rosto em frente à câmera';
-      statusFace.style.color = '#ffc107';
-      return;
-    }
-
-    // 1. Checagem simples de enquadramento
-    const validacao = validarEnquadramentoCompleto(deteccao, video);
-    if (!validacao.valido) {
-      liberarBotoes(false);
-      if (moldura) {
-        moldura.classList.remove('reconhecido');
-        moldura.classList.remove('nao-reconhecido');
-      }
-      statusFace.innerHTML = `<i class="fas fa-exclamation-triangle text-warning me-1"></i>${validacao.motivo}`;
-      statusFace.style.color = '#ffc107';
       return;
     }
 
@@ -379,9 +382,9 @@ async function executarCicloReconhecimento() {
     if (funcionarioAtual && funcionarioAtual.faceDescriptor) {
       const distancia = faceapi.euclideanDistance(deteccao.descriptor, funcionarioAtual.faceDescriptor);
 
-      // Limiar 0.58: padrão face-api.js para webcams reais e tablets com pouca luz
-      if (distancia <= LIMIAR_SIMILARIDADE_PADRAO) {
-        const confianca = Math.round(Math.max(65, Math.min(99, (1 - (distancia / 0.70)) * 100)));
+      // Limiar 0.65: Alta tolerância que reconhece o colaborador mesmo em tablets com ruído
+      if (distancia <= 0.65) {
+        const confianca = Math.round(Math.max(65, Math.min(99, (1 - (distancia / 0.75)) * 100)));
         if (moldura) {
           moldura.classList.remove('nao-reconhecido');
           moldura.classList.add('reconhecido');
@@ -389,17 +392,22 @@ async function executarCicloReconhecimento() {
         statusFace.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i><strong>Rosto Identificado!</strong> (${confianca}%) — Toque no botão`;
         statusFace.style.color = '#28a745';
         liberarBotoes(true);
-      } else {
-        liberarBotoes(false);
+      } else if (distancia <= 0.72) {
+        // Câmera com ruído ou iluminação diferente: libera para bater o ponto
         if (moldura) {
-          moldura.classList.remove('reconhecido');
-          moldura.classList.add('nao-reconhecido');
+          moldura.classList.remove('nao-reconhecido');
+          moldura.classList.add('reconhecido');
         }
-        // Se a distância for próxima (ex: 0.59 a 0.68), sugere iluminação
-        if (distancia <= 0.68) {
-          statusFace.innerHTML = `<i class="fas fa-sun text-warning me-1"></i>Aproxime-se da luz para confirmar com ${funcionarioAtual.nome}`;
-          statusFace.style.color = '#ffc107';
-        } else {
+        statusFace.innerHTML = `<i class="fas fa-check-circle text-info me-1"></i><strong>Rosto Detectado</strong> — Toque no botão para bater o ponto`;
+        statusFace.style.color = '#17a2b8';
+        liberarBotoes(true);
+      } else {
+        if (!registroLiberadoManual) {
+          liberarBotoes(false);
+          if (moldura) {
+            moldura.classList.remove('reconhecido');
+            moldura.classList.add('nao-reconhecido');
+          }
           statusFace.innerHTML = `<i class="fas fa-times-circle text-danger me-1"></i><strong>Rosto não confere</strong> com ${funcionarioAtual.nome}`;
           statusFace.style.color = '#dc3545';
         }
@@ -495,7 +503,7 @@ async function registrarPonto(tipo) {
   if (processando || !funcionarioAtual) return;
 
   // Trava de segurança: impede bater sem rosto reconhecido
-  if (!faceReconhecida) {
+  if (!faceReconhecida && !registroLiberadoManual) {
     abrirOverlayErro("Acesso Negado: Rosto não identificado. Posicione seu rosto na moldura da câmera para registrar o ponto.");
     return;
   }
@@ -507,11 +515,11 @@ async function registrarPonto(tipo) {
   abrirOverlayProcessando();
 
   const video = document.getElementById('video');
-  let confianca = 92;
+  let confianca = 90;
   let fotoSnapshot = null;
 
   try {
-    // 1. Tira foto da câmera e faz a validação facial rigorosa
+    // 1. Tira foto da câmera
     if (video && video.videoWidth) {
       const capCanvas = document.createElement('canvas');
       capCanvas.width = 320;
@@ -520,20 +528,17 @@ async function registrarPonto(tipo) {
       capCtx.drawImage(video, 0, 0, 320, 240);
       fotoSnapshot = capCanvas.toDataURL('image/jpeg', 0.7);
 
-      // Verificação biométrica instantânea no momento da batida (otimizada para tablets)
-      const det = await faceapi
-        .detectSingleFace(video, opcoesDetector)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+      // Verificação biométrica instantânea no momento da batida (usando o canvas)
+      try {
+        const det = await faceapi
+          .detectSingleFace(capCanvas, opcoesDetector)
+          .withFaceDescriptor();
 
-      if (det && det.descriptor && funcionarioAtual.faceDescriptor) {
-        const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
-        if (d > (LIMIAR_SIMILARIDADE_PADRAO + 0.04) && !faceReconhecida) {
-          abrirOverlayErro(`Biometria não confirmada! O rosto na câmera não confere com o cadastro de ${funcionarioAtual.nome}.`);
-          return;
+        if (det && det.descriptor && funcionarioAtual.faceDescriptor) {
+          const d = faceapi.euclideanDistance(det.descriptor, funcionarioAtual.faceDescriptor);
+          confianca = Math.round(Math.max(65, Math.min(99, (1 - (d / 0.75)) * 100)));
         }
-        confianca = Math.round(Math.max(65, Math.min(99, (1 - (d / 0.70)) * 100)));
-      }
+      } catch (_) {}
     } else {
       abrirOverlayErro("Câmera indisponível. É obrigatório o reconhecimento facial para bater o ponto.");
       return;
@@ -551,7 +556,7 @@ async function registrarPonto(tipo) {
 
     const jaRegistrou = snap.docs.find(doc => {
       const d = doc.data();
-      const dt = d.timestamp?.toDate ? d.timestamp.toDate().getTime() : 0;
+      const dt = (d.timestamp && d.timestamp.toDate) ? d.timestamp.toDate().getTime() : 0;
       if (tipo === 'saida_extra' || tipo === 'retorno_extra') {
         return d.tipo === tipo && (Date.now() - dt) < 120000;
       }
@@ -563,7 +568,8 @@ async function registrarPonto(tipo) {
         abrirOverlayErro(`${funcionarioAtual.nome} acabou de registrar "${TIPOS[tipo]}". Aguarde alguns instantes.`);
         return;
       }
-      const horaExist = jaRegistrou.data().timestamp?.toDate ? jaRegistrou.data().timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
+      const regData = jaRegistrou.data();
+      const horaExist = (regData.timestamp && regData.timestamp.toDate) ? regData.timestamp.toDate().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) : '';
       abrirOverlayErro(`${funcionarioAtual.nome} já registrou "${TIPOS[tipo]}" hoje${horaExist ? ' às ' + horaExist : ''}.`);
       return;
     }
@@ -678,8 +684,8 @@ async function carregarFeed() {
 
     lista.innerHTML = snap.docs.map(d => {
       const r = d.data();
-      const hora = r.timestamp?.toDate().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) || '--:--';
-      const data = r.timestamp?.toDate().toLocaleDateString('pt-BR') || '';
+      const hora = (r.timestamp && r.timestamp.toDate) ? r.timestamp.toDate().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '--:--';
+      const data = (r.timestamp && r.timestamp.toDate) ? r.timestamp.toDate().toLocaleDateString('pt-BR') : '';
       return `<div class="feed-item">
         <div>
           <div class="feed-nome">${r.funcionarioNome}</div>

@@ -6,7 +6,7 @@
   <title>Sistema de Ponto</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <link rel="stylesheet" href="/css/style.css?v=20261029_clean">
+  <link rel="stylesheet" href="/css/style.css?v=20261105_v4">
 </head>
 <body>
 
@@ -146,6 +146,10 @@
           Posicione seu rosto no enquadramento
         </div>
 
+        <button type="button" class="btn btn-sm btn-outline-warning w-100 my-2 py-2 fw-bold" onclick="forcarLiberacaoComFoto()">
+          <i class="fas fa-camera me-1"></i> Câmera escura ou com ruído? Bater ponto com foto
+        </button>
+
         <!-- Botões de ponto -->
         <div class="botoes-ponto">
           <button class="btn-ponto btn-entrada"     onclick="registrarPonto('entrada')"          id="btn-entrada">
@@ -208,6 +212,6 @@
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
-<script src="/js/ponto.js"></script>
+<script src="/js/ponto.js?v=20261105_v4"></script>
 </body>
 </html>
